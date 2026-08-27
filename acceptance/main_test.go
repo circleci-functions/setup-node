@@ -59,12 +59,36 @@ type runFunc func(t *testing.T, extraEnv map[string]string, args ...string) (str
 // sandbox returns a sandbox plus a run function bound to its env.
 //
 // The cache is CircleCI's own when the caller asks for it with
-// TOOLKIT_CACHE_MODE=live — which the CI job does, so the round-trips there are
-// exact — and in-memory otherwise, so the same suite runs on a laptop.
+// TOOLKIT_CACHE_MODE=live — which the CI job does, so the saves here hit the
+// real task-agent — and in-memory otherwise, so the same suite runs on a laptop.
 func sandbox(t *testing.T) (*sdktest.Sandbox, runFunc) {
 	t.Helper()
 	s := sdktest.NewSandbox(t, sdktest.WithLiveCache())
-	return s, func(t *testing.T, extraEnv map[string]string, args ...string) (string, error) {
+	return s, newRun(t, s)
+}
+
+// sandboxInMemory returns a sandbox backed by a fresh in-memory cache,
+// regardless of TOOLKIT_CACHE_MODE.
+//
+// A within-job save-then-restore round-trip cannot be asserted against the live
+// cache from here: setup-node's key is derived from the lockfile and CircleCI
+// cache keys are write-once, so the same key recurs across pipeline runs and a
+// re-save is a no-op that leaves an earlier run's sandbox temp path stored — a
+// later restore then misses this run's temp dir. The fresh in-memory cache has
+// no such history, so the round-trip is exact. The live round-trip end to end
+// is covered by the CI smoke job, whose cache path is the executor's stable
+// ~/.npm rather than a per-run temp dir.
+func sandboxInMemory(t *testing.T) (*sdktest.Sandbox, runFunc) {
+	t.Helper()
+	s := sdktest.NewSandbox(t)
+	return s, newRun(t, s)
+}
+
+// newRun returns a run function that executes the binary in s's environment,
+// with extraEnv applied on top.
+func newRun(t *testing.T, s *sdktest.Sandbox) runFunc {
+	t.Helper()
+	return func(t *testing.T, extraEnv map[string]string, args ...string) (string, error) {
 		t.Helper()
 		r := runner.New(t, binaryPath, runner.WithSandboxEnv(sandboxEnv(s, extraEnv)))
 		_, err := r.Run(args...)

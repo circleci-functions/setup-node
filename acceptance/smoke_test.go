@@ -15,20 +15,16 @@ import (
 )
 
 // TestAcceptance_Smoke runs the sequence the CircleCI smoke-test job used to run
-// as bash steps, against a real npm install and a real task-agent cache: install
-// packages, confirm the cache-dir export reaches a later step through $BASH_ENV,
-// then simulate a fresh executor and confirm the second install comes back from
-// the cache.
+// as bash steps, against a real npm install: install packages, confirm the
+// cache-dir export reaches a later step through $BASH_ENV, then simulate a fresh
+// executor and confirm the second install comes back from the cache.
 //
-// It asserts the second install is a cache hit, not that the first is a miss:
-// CircleCI cache keys are write-once and setup-node derives its key from the
-// lockfile content, so the same key recurs across pipeline runs. A hit on the
-// save-then-restore round-trip is the honest property; a guaranteed cold miss
-// would need a per-run key, which the lockfile-derived scheme cannot have
-// without a lockfile npm would reject.
+// The cache is in-memory here (see sandboxInMemory): the round-trip is exact
+// only against a cache with no prior history of setup-node's lockfile-derived,
+// write-once key. The live round-trip end to end is the CI smoke job's job.
 func TestAcceptance_Smoke(t *testing.T) {
 	requirePM(t, "npm")
-	s, run := sandbox(t)
+	s, run := sandboxInMemory(t)
 	appDir := copyFixture(t, "npm")
 
 	installArgs := []string{"install", "--app-dir", appDir, "--package-manager", "npm"}
@@ -36,6 +32,8 @@ func TestAcceptance_Smoke(t *testing.T) {
 	if !t.Run("Install", func(t *testing.T) {
 		out, err := run(t, nil, installArgs...)
 		assert.NilError(t, err, "got: %s", out)
+		assert.Assert(t, !strings.Contains(out, "from cache"),
+			"the first install has nothing to restore; got: %s", out)
 		assertInstalled(t, appDir)
 	}) {
 		t.Fatal("install failed; aborting remaining steps")
