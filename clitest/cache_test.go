@@ -1,20 +1,16 @@
-package nodeinstallpackages_test
+package clitest_test
 
 import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"gotest.tools/v3/assert"
-	"gotest.tools/v3/skip"
-
-	"github.com/circleci-functions/toolkit/sdk/sdktest"
 )
 
 type cacheSave struct {
@@ -24,6 +20,8 @@ type cacheSave struct {
 
 // cacheRecorder is a fake CircleCI plugin server that records save/restore
 // calls made against it, for asserting how setup-node drives the cache SDK.
+// It stands in for the sandbox's own cache when a test needs to inspect the
+// exact keys and paths, which the round-trip cache does not expose.
 type cacheRecorder struct {
 	mu       sync.Mutex
 	restores [][]string
@@ -64,23 +62,25 @@ func newCacheRecorder(t *testing.T) (*cacheRecorder, string) {
 	return rec, srv.URL
 }
 
-// TestCLI_Cache_SaveAndRestoreCalled verifies that a successful install
-// restores the package manager cache before installing and saves it back
-// under the same key afterwards.
-func TestCLI_Cache_SaveAndRestoreCalled(t *testing.T) {
-	_, err := exec.LookPath("npm")
-	skip.If(t, err != nil, "npm not found on PATH")
+// These tests put a no-op npm stub on PATH (stubPMPath): the cache
+// restore/save happens either side of the install regardless of what the
+// install does, so a stub that installs nothing keeps them hermetic while still
+// exercising the full cache-driving path against a recorder.
 
+// TestCLI_Cache_SaveAndRestoreCalled verifies that an install restores the
+// package manager cache before installing and saves it back under the same key
+// afterwards, keyed on the package manager and pointed at its cache directory.
+func TestCLI_Cache_SaveAndRestoreCalled(t *testing.T) {
+	_, run := sandbox(t)
 	rec, pluginURL := newCacheRecorder(t)
 
-	appDir := t.TempDir()
-	copyFixture(t, "testdata/npm", appDir)
+	appDir := copyFixture(t, "npm")
 	cacheDir := t.TempDir()
 
 	env := map[string]string{
 		"CIRCLECI_PLUGIN_URL": pluginURL,
 		"NPM_CONFIG_CACHE":    cacheDir,
-		"BASH_ENV":            filepath.Join(t.TempDir(), "bash_env"),
+		"PATH":                stubPMPath(t),
 	}
 
 	out, err := run(t, env, "install", "--app-dir", appDir, "--package-manager", "npm")
@@ -97,51 +97,41 @@ func TestCLI_Cache_SaveAndRestoreCalled(t *testing.T) {
 	assert.DeepEqual(t, rec.saves[0].Paths, []string{cacheDir})
 }
 
-// TestCLI_Cache_NoCallsWithNoWithCache verifies that --no-with-cache skips
-// both the restore and the save call entirely.
+// TestCLI_Cache_NoCallsWithNoWithCache verifies that --no-with-cache skips both
+// the restore and the save call, and does not write $BASH_ENV.
 func TestCLI_Cache_NoCallsWithNoWithCache(t *testing.T) {
-	_, err := exec.LookPath("npm")
-	skip.If(t, err != nil, "npm not found on PATH")
-
+	s, run := sandbox(t)
 	rec, pluginURL := newCacheRecorder(t)
 
-	appDir := t.TempDir()
-	copyFixture(t, "testdata/npm", appDir)
+	appDir := copyFixture(t, "npm")
 
-	env := map[string]string{
-		"CIRCLECI_PLUGIN_URL": pluginURL,
-		"NPM_CONFIG_CACHE":    t.TempDir(),
-	}
+	env := map[string]string{"CIRCLECI_PLUGIN_URL": pluginURL, "PATH": stubPMPath(t)}
 
 	out, err := run(t, env, "install", "--app-dir", appDir, "--package-manager", "npm", "--no-with-cache")
 	assert.NilError(t, err, "output: %s", out)
 
 	assert.Equal(t, len(rec.restores), 0, "expected no restore calls")
 	assert.Equal(t, len(rec.saves), 0, "expected no save calls")
+
+	_, statErr := os.Stat(s.BashEnv)
+	assert.Assert(t, os.IsNotExist(statErr), "$BASH_ENV should not be written with --no-with-cache")
 }
 
 // TestCLI_Cache_KeyChangesWithLockfileContent verifies that the cache key is
 // derived from the lockfile contents, so a changed lockfile busts the cache.
 func TestCLI_Cache_KeyChangesWithLockfileContent(t *testing.T) {
-	_, err := exec.LookPath("npm")
-	skip.If(t, err != nil, "npm not found on PATH")
-
+	_, run := sandbox(t)
 	rec, pluginURL := newCacheRecorder(t)
 
 	runOnce := func(lockfileSuffix string) string {
-		appDir := t.TempDir()
-		copyFixture(t, "testdata/npm", appDir)
+		appDir := copyFixture(t, "npm")
 		lockfile := filepath.Join(appDir, "package-lock.json")
-		data, readErr := os.ReadFile(lockfile) //nolint:gosec // test fixture path
+		data, readErr := os.ReadFile(lockfile) //nolint:gosec // fixture path is controlled by the test suite
 		assert.NilError(t, readErr)
-		// #nosec G703: Test fixture paths are controlled within the test suite
+		//nolint:gosec // fixture path is controlled by the test suite; fixtures are not secrets
 		assert.NilError(t, os.WriteFile(lockfile, append(data, []byte(lockfileSuffix)...), 0600))
 
-		env := map[string]string{
-			"CIRCLECI_PLUGIN_URL": pluginURL,
-			"NPM_CONFIG_CACHE":    t.TempDir(),
-			"BASH_ENV":            filepath.Join(t.TempDir(), "bash_env"),
-		}
+		env := map[string]string{"CIRCLECI_PLUGIN_URL": pluginURL, "NPM_CONFIG_CACHE": t.TempDir(), "PATH": stubPMPath(t)}
 		out, runErr := run(t, env, "install", "--app-dir", appDir, "--package-manager", "npm")
 		assert.NilError(t, runErr, "output: %s", out)
 		return rec.restores[len(rec.restores)-1][0]
@@ -153,58 +143,21 @@ func TestCLI_Cache_KeyChangesWithLockfileContent(t *testing.T) {
 }
 
 // TestCLI_Cache_SkippedWhenLockfileMissing verifies that a missing lockfile
-// (e.g. an --override-command run with nothing to check out) skips the
+// (e.g. an --override-command run with nothing checked out) skips the
 // restore/save calls without failing the install.
 func TestCLI_Cache_SkippedWhenLockfileMissing(t *testing.T) {
-	_, err := exec.LookPath("npm")
-	skip.If(t, err != nil, "npm not found on PATH")
-
+	_, run := sandbox(t)
 	rec, pluginURL := newCacheRecorder(t)
 
 	appDir := t.TempDir() // no package.json / lockfile
 
-	env := map[string]string{
-		"CIRCLECI_PLUGIN_URL": pluginURL,
-		"NPM_CONFIG_CACHE":    t.TempDir(),
-		"BASH_ENV":            filepath.Join(t.TempDir(), "bash_env"),
-	}
+	env := map[string]string{"CIRCLECI_PLUGIN_URL": pluginURL, "NPM_CONFIG_CACHE": t.TempDir(), "PATH": stubPMPath(t)}
 
-	out, err := run(t, env, "install", "--app-dir", appDir, "--package-manager", "npm", "--override-command", "true")
+	out, err := run(t, env, "install", "--app-dir", appDir, "--package-manager", "npm")
 	assert.NilError(t, err, "output: %s", out)
-	assert.Assert(t, strings.Contains(out, "skipping cache restore"), "expected output to mention skipping cache restore; got: %s", out)
+	assert.Assert(t, strings.Contains(out, "skipping cache restore"),
+		"expected output to mention skipping cache restore; got: %s", out)
 
 	assert.Equal(t, len(rec.restores), 0, "expected no restore calls")
 	assert.Equal(t, len(rec.saves), 0, "expected no save calls")
-}
-
-// TestCLI_Cache_RestoreLogsOnHit verifies the full cache round-trip against a
-// real (fake) plugin server: the first run saves the npm cache; after
-// clearing it, the second run restores it and logs that it did, mirroring
-// what the setup-node-smoke-test CI job greps for.
-func TestCLI_Cache_RestoreLogsOnHit(t *testing.T) {
-	_, err := exec.LookPath("npm")
-	skip.If(t, err != nil, "npm not found on PATH")
-
-	srv := sdktest.NewServer(t)
-	srv.SetupEnv(t)
-
-	appDir := t.TempDir()
-	copyFixture(t, "testdata/npm", appDir)
-	cacheDir := t.TempDir()
-
-	env := map[string]string{
-		"NPM_CONFIG_CACHE": cacheDir,
-		"BASH_ENV":         filepath.Join(t.TempDir(), "bash_env"),
-	}
-
-	out, err := run(t, env, "install", "--app-dir", appDir, "--package-manager", "npm")
-	assert.NilError(t, err, "run 1 output: %s", out)
-	assert.Assert(t, !strings.Contains(out, "restored"), "first run should not report a cache hit; got: %s", out)
-
-	assert.NilError(t, os.RemoveAll(cacheDir))
-	assert.NilError(t, os.RemoveAll(filepath.Join(appDir, "node_modules")))
-
-	out, err = run(t, env, "install", "--app-dir", appDir, "--package-manager", "npm")
-	assert.NilError(t, err, "run 2 output: %s", out)
-	assert.Assert(t, strings.Contains(out, "restored"), "expected second run to report a cache hit; got: %s", out)
 }
