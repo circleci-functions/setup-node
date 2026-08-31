@@ -16,6 +16,12 @@ import (
 type cacheSave struct {
 	Key   string
 	Paths []string
+	Name  string
+}
+
+type cacheRestore struct {
+	Keys []string
+	Name string
 }
 
 // cacheRecorder is a fake CircleCI plugin server that records save/restore
@@ -24,7 +30,7 @@ type cacheSave struct {
 // exact keys and paths, which the round-trip cache does not expose.
 type cacheRecorder struct {
 	mu       sync.Mutex
-	restores [][]string
+	restores []cacheRestore
 	saves    []cacheSave
 }
 
@@ -36,10 +42,11 @@ func newCacheRecorder(t *testing.T) (*cacheRecorder, string) {
 	mux.HandleFunc("/step/cache/restore", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Keys []string `json:"keys"`
+			Name string   `json:"name"`
 		}
 		assert.NilError(t, json.NewDecoder(r.Body).Decode(&req))
 		rec.mu.Lock()
-		rec.restores = append(rec.restores, req.Keys)
+		rec.restores = append(rec.restores, cacheRestore{Keys: req.Keys, Name: req.Name})
 		rec.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"result": "success"})
@@ -48,10 +55,11 @@ func newCacheRecorder(t *testing.T) (*cacheRecorder, string) {
 		var req struct {
 			Key   string   `json:"key"`
 			Paths []string `json:"paths"`
+			Name  string   `json:"name"`
 		}
 		assert.NilError(t, json.NewDecoder(r.Body).Decode(&req))
 		rec.mu.Lock()
-		rec.saves = append(rec.saves, cacheSave{Key: req.Key, Paths: req.Paths})
+		rec.saves = append(rec.saves, cacheSave{Key: req.Key, Paths: req.Paths, Name: req.Name})
 		rec.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"result": "success"})
@@ -87,14 +95,16 @@ func TestCLI_Cache_SaveAndRestoreCalled(t *testing.T) {
 	assert.NilError(t, err, "output: %s", out)
 
 	assert.Equal(t, len(rec.restores), 1, "expected exactly one restore call")
-	assert.Equal(t, len(rec.restores[0]), 1, "expected exactly one restore key")
-	key := rec.restores[0][0]
+	assert.Equal(t, len(rec.restores[0].Keys), 1, "expected exactly one restore key")
+	key := rec.restores[0].Keys[0]
 	assert.Assert(t, strings.Contains(key, "setup-node-packages-v1-"), "unexpected cache key: %s", key)
 	assert.Assert(t, strings.Contains(key, "npm"), "expected cache key to mention the package manager: %s", key)
+	assert.Equal(t, rec.restores[0].Name, "Restoring npm cache", "expected the restore step to be named")
 
 	assert.Equal(t, len(rec.saves), 1, "expected exactly one save call")
 	assert.Equal(t, rec.saves[0].Key, key, "save must use the same key as restore")
 	assert.DeepEqual(t, rec.saves[0].Paths, []string{cacheDir})
+	assert.Equal(t, rec.saves[0].Name, "Saving npm cache", "expected the save step to be named")
 }
 
 // TestCLI_Cache_NoCallsWithNoWithCache verifies that --no-with-cache skips both
@@ -134,7 +144,7 @@ func TestCLI_Cache_KeyChangesWithLockfileContent(t *testing.T) {
 		env := map[string]string{"CIRCLECI_PLUGIN_URL": pluginURL, "NPM_CONFIG_CACHE": t.TempDir(), "PATH": stubPMPath(t)}
 		out, runErr := run(t, env, "install", "--app-dir", appDir, "--package-manager", "npm")
 		assert.NilError(t, runErr, "output: %s", out)
-		return rec.restores[len(rec.restores)-1][0]
+		return rec.restores[len(rec.restores)-1].Keys[0]
 	}
 
 	key1 := runOnce("")
