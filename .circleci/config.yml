@@ -30,7 +30,7 @@ executors:
   go:
     docker:
       - image: cimg/go:1.26
-  # smoke execs the binary `build` cross-compiled, on an image with no Go.
+  # smoke-test execs the binary `build` cross-compiled, on an image with no Go.
   base:
     docker:
       - image: cimg/base:stable
@@ -54,7 +54,7 @@ jobs:
             - ~/go/pkg/mod
 
   # Cross-compiles setup-node into ./dist and persists it to the workspace, so
-  # smoke exercises exactly what `publish` is about to ship.
+  # smoke-test exercises exactly what `publish` is about to ship.
   build:
     executor: go
     steps:
@@ -102,7 +102,7 @@ jobs:
   # The one property the in-process acceptance suite can't prove: the shipped
   # cross-compiled artifact installs for real, and the cache-dir export it
   # writes is sourced from $BASH_ENV into a later step by the real job runner.
-  smoke:
+  smoke-test:
     executor: base
     steps:
       - checkout
@@ -172,14 +172,14 @@ workflows:
           filters:
             tags:
               only: /.*/
-      - smoke:
+      - smoke-test:
           requires: [build]
           context: [github-readonly]
           filters:
             tags:
               only: /.*/
       - publish:
-          requires: [test, acceptance, smoke]
+          requires: [test, acceptance, smoke-test]
           context: [functions-publisher, github-readonly]
           filters:
             tags:

@@ -132,7 +132,7 @@ acceptance`; it needs network access and the package managers on PATH, but will
 not touch your real home directory or a shared cache key.
 
 In CI, `acceptance` installs the package managers with the `node` orb and runs
-the full matrix against the live cache. A separate `smoke` job runs the
+the full matrix against the live cache. A separate `smoke-test` job runs the
 cross-compiled artifact `publish` is about to ship through one install, checking
 the cache-directory export it writes is sourced from `$BASH_ENV` into a later
 step by the real job runner.
