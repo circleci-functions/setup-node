@@ -106,3 +106,33 @@ circleci run setup-node@v1.0.0 install --override-command "npm install --legacy-
 ## Platform support
 
 Linux and macOS (amd64 and arm64). Windows support is deferred.
+
+## Tests
+
+Three layers, each in the cheapest place that can hold it.
+
+**Unit** — `node/` covers package-manager detection and command building
+directly.
+
+**CLI** — `clitest/` compiles the real binary and runs it as a subprocess to
+cover the flag surface and its error paths: unknown flags, invalid
+`--package-manager`, a missing `--app-dir`, a package manager absent from PATH,
+and the cache round-trip contract (which keys are restored and saved). It is
+hermetic — a no-op package-manager stub stands in for the real one and the
+registry is never reached — so it needs no network and runs under `task test` on
+every commit. Each test runs in a `toolkit/sdk/sdktest` sandbox, so `$HOME`,
+`$BASH_ENV` and the cache are all temp locations.
+
+**Acceptance** — `acceptance/`, behind a `//go:build acceptance` tag so it stays
+out of `task test`. Same sandboxing, but against real infrastructure: a real
+frozen install for each package manager, and a real CircleCI task-agent cache
+when running inside a job (`TOOLKIT_CACHE_MODE=live`; it falls back to the
+in-memory cache elsewhere, so the suite still runs on a laptop). Run with `task
+acceptance`; it needs network access and the package managers on PATH, but will
+not touch your real home directory or a shared cache key.
+
+In CI, `acceptance` installs the package managers with the `node` orb and runs
+the full matrix against the live cache. A separate `smoke-test` job runs the
+cross-compiled artifact `publish` is about to ship through one install, checking
+the cache-directory export it writes is sourced from `$BASH_ENV` into a later
+step by the real job runner.
