@@ -91,7 +91,7 @@ func TestCLI_Cache_SaveAndRestoreCalled(t *testing.T) {
 		"PATH":                stubPMPath(t),
 	}
 
-	out, err := run(t, env, "install", "--app-dir", appDir, "--package-manager", "npm")
+	out, err := run(t, env, "--app-dir", appDir, "--package-manager", "npm")
 	assert.NilError(t, err, "output: %s", out)
 
 	assert.Equal(t, len(rec.restores), 1, "expected exactly one restore call")
@@ -107,9 +107,9 @@ func TestCLI_Cache_SaveAndRestoreCalled(t *testing.T) {
 	assert.Equal(t, rec.saves[0].Name, "Saving npm cache", "expected the save step to be named")
 }
 
-// TestCLI_Cache_NoCallsWithNoWithCache verifies that --no-with-cache skips both
+// TestCLI_Cache_NoCallsWithCacheDisabled verifies that --cache=false skips both
 // the restore and the save call, and does not write $BASH_ENV.
-func TestCLI_Cache_NoCallsWithNoWithCache(t *testing.T) {
+func TestCLI_Cache_NoCallsWithCacheDisabled(t *testing.T) {
 	s, run := sandbox(t)
 	rec, pluginURL := newCacheRecorder(t)
 
@@ -117,14 +117,14 @@ func TestCLI_Cache_NoCallsWithNoWithCache(t *testing.T) {
 
 	env := map[string]string{"CIRCLECI_PLUGIN_URL": pluginURL, "PATH": stubPMPath(t)}
 
-	out, err := run(t, env, "install", "--app-dir", appDir, "--package-manager", "npm", "--no-with-cache")
+	out, err := run(t, env, "--app-dir", appDir, "--package-manager", "npm", "--cache=false")
 	assert.NilError(t, err, "output: %s", out)
 
 	assert.Equal(t, len(rec.restores), 0, "expected no restore calls")
 	assert.Equal(t, len(rec.saves), 0, "expected no save calls")
 
 	_, statErr := os.Stat(s.BashEnv)
-	assert.Assert(t, os.IsNotExist(statErr), "$BASH_ENV should not be written with --no-with-cache")
+	assert.Assert(t, os.IsNotExist(statErr), "$BASH_ENV should not be written with --cache=false")
 }
 
 // TestCLI_Cache_KeyChangesWithLockfileContent verifies that the cache key is
@@ -142,7 +142,7 @@ func TestCLI_Cache_KeyChangesWithLockfileContent(t *testing.T) {
 		assert.NilError(t, os.WriteFile(lockfile, append(data, []byte(lockfileSuffix)...), 0600))
 
 		env := map[string]string{"CIRCLECI_PLUGIN_URL": pluginURL, "NPM_CONFIG_CACHE": t.TempDir(), "PATH": stubPMPath(t)}
-		out, runErr := run(t, env, "install", "--app-dir", appDir, "--package-manager", "npm")
+		out, runErr := run(t, env, "--app-dir", appDir, "--package-manager", "npm")
 		assert.NilError(t, runErr, "output: %s", out)
 		return rec.restores[len(rec.restores)-1].Keys[0]
 	}
@@ -163,7 +163,7 @@ func TestCLI_Cache_SkippedWhenLockfileMissing(t *testing.T) {
 
 	env := map[string]string{"CIRCLECI_PLUGIN_URL": pluginURL, "NPM_CONFIG_CACHE": t.TempDir(), "PATH": stubPMPath(t)}
 
-	out, err := run(t, env, "install", "--app-dir", appDir, "--package-manager", "npm")
+	out, err := run(t, env, "--app-dir", appDir, "--package-manager", "npm")
 	assert.NilError(t, err, "output: %s", out)
 	assert.Assert(t, strings.Contains(out, "skipping cache restore"),
 		"expected output to mention skipping cache restore; got: %s", out)

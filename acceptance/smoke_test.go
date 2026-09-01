@@ -27,7 +27,7 @@ func TestAcceptance_Smoke(t *testing.T) {
 	s, run := sandboxInMemory(t)
 	appDir := copyFixture(t, "npm")
 
-	installArgs := []string{"install", "--app-dir", appDir, "--package-manager", "npm"}
+	installArgs := []string{"--app-dir", appDir, "--package-manager", "npm"}
 
 	if !t.Run("Install", func(t *testing.T) {
 		out, err := run(t, nil, installArgs...)
