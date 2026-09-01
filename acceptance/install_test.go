@@ -25,7 +25,7 @@ func TestAcceptance_Install(t *testing.T) {
 			s, run := sandbox(t)
 			appDir := copyFixture(t, pm)
 
-			out, err := run(t, nil, "install", "--app-dir", appDir, "--package-manager", pm)
+			out, err := run(t, nil, "--app-dir", appDir, "--package-manager", pm)
 			assert.NilError(t, err, "output: %s", out)
 
 			_, statErr := os.Stat(filepath.Join(appDir, "node_modules", "is-odd"))
@@ -49,7 +49,7 @@ func TestAcceptance_Install_AutoDetectsFromLockfile(t *testing.T) {
 	_, run := sandbox(t)
 	appDir := copyFixture(t, "npm")
 
-	out, err := run(t, nil, "install", "--app-dir", appDir)
+	out, err := run(t, nil, "--app-dir", appDir)
 	assert.NilError(t, err, "output: %s", out)
 	assert.Assert(t, strings.Contains(out, "using package manager npm"),
 		"expected npm to be auto-detected; got: %s", out)
@@ -65,7 +65,7 @@ func TestAcceptance_Install_ExplicitOverridesAutoDetection(t *testing.T) {
 	// #nosec G306: fixture file, not a secret
 	assert.NilError(t, os.WriteFile(filepath.Join(appDir, "yarn.lock"), []byte(""), 0600))
 
-	out, err := run(t, nil, "install", "--app-dir", appDir, "--package-manager", "npm")
+	out, err := run(t, nil, "--app-dir", appDir, "--package-manager", "npm")
 	assert.NilError(t, err, "output: %s", out)
 	assert.Assert(t, strings.Contains(out, "using package manager npm"),
 		"expected the explicit --package-manager npm to win; got: %s", out)

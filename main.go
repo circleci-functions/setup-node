@@ -27,10 +27,6 @@ import (
 )
 
 type cli struct {
-	Install installCmd `cmd:"" help:"Install Node.js packages using the detected or specified package manager."`
-}
-
-type installCmd struct {
 	AppDir          string `help:"Directory containing package.json." default:"."`
 	PackageManager  string `help:"Package manager to use: npm, yarn, pnpm, or bun. Auto-detected from lockfile if omitted." enum:"npm,yarn,pnpm,bun," default:""`
 	OverrideCommand string `help:"Override the default CI install command (e.g. 'npm install --legacy-peer-deps')."`
@@ -52,7 +48,7 @@ func toUnixPath(path string) string {
 	return p
 }
 
-func (c *installCmd) Run(ctx context.Context, client *sdk.Client) error {
+func (c *cli) Run(ctx context.Context, client *sdk.Client) error {
 	appDir, err := filepath.Abs(c.AppDir)
 	if err != nil {
 		return fmt.Errorf("resolve app-dir: %w", err)
@@ -118,7 +114,7 @@ func (c *installCmd) Run(ctx context.Context, client *sdk.Client) error {
 
 // resolvePackageManager returns the package manager from the flag or by
 // detecting the lockfile in AppDir.
-func (c *installCmd) resolvePackageManager() (node.PackageManager, error) {
+func (c *cli) resolvePackageManager() (node.PackageManager, error) {
 	if c.PackageManager != "" {
 		return node.PackageManager(c.PackageManager), nil
 	}
@@ -137,7 +133,7 @@ func run(ctx context.Context, client *sdk.Client) error {
 	var flags cli
 	kCtx := kong.Parse(&flags,
 		kong.Name("setup-node"),
-		kong.Description("Install Node.js packages and export cache paths to $BASH_ENV.\n\nExample:\n  circleci run setup-node@<version> install --app-dir ./frontend"),
+		kong.Description("Install Node.js packages and export cache paths to $BASH_ENV.\n\nExample:\n  circleci run setup-node@<version> -- --app-dir ./frontend"),
 		kong.UsageOnError(),
 		functionyaml.Embed(),
 	)

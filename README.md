@@ -5,7 +5,7 @@ Detects the Node.js package manager in use and runs the appropriate CI-safe froz
 Invoked via:
 
 ```
-circleci run setup-node@<version> install [flags]
+circleci run setup-node@<version> -- [flags]
 ```
 
 ## Capabilities
@@ -91,16 +91,16 @@ If `$BASH_ENV` is not set, exports are written to stdout only.
 
 ```bash
 # Auto-detect from lockfile in current directory
-circleci run setup-node@v1.0.0 install
+circleci run setup-node@v1.0.0
 
 # Specify app directory (monorepo)
-circleci run setup-node@v1.0.0 install --app-dir ./packages/web
+circleci run setup-node@v1.0.0 -- --app-dir ./packages/web
 
 # Explicit package manager, skip cache export
-circleci run setup-node@v1.0.0 install --pkg-manager pnpm --no-with-cache
+circleci run setup-node@v1.0.0 -- --package-manager pnpm --no-with-cache
 
 # Custom install command
-circleci run setup-node@v1.0.0 install --override-command "npm install --legacy-peer-deps"
+circleci run setup-node@v1.0.0 -- --override-command "npm install --legacy-peer-deps"
 ```
 
 ## Platform support

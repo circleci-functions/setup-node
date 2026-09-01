@@ -120,7 +120,7 @@ jobs:
             printf '{\n  "dependencies": {\n    "is-odd": "^3.0.1"\n  }\n}\n' > package.json
             npm install
             rm -rf node_modules
-            "$BIN" install --app-dir "$APP" --package-manager npm
+            "$BIN" --app-dir "$APP" --package-manager npm
             test -d "$APP/node_modules/is-odd"
       - run:
           name: Assert NPM_CONFIG_CACHE exported to $BASH_ENV
@@ -130,7 +130,7 @@ jobs:
           command: |
             BIN="$PWD/dist/setup-node/linux/amd64/setup-node"
             rm -rf "$NPM_CONFIG_CACHE" "$SETUP_NODE_NPM_APP/node_modules"
-            "$BIN" install --app-dir "$SETUP_NODE_NPM_APP" --package-manager npm 2>&1 | tee /tmp/setup-node-second-run.log
+            "$BIN" --app-dir "$SETUP_NODE_NPM_APP" --package-manager npm 2>&1 | tee /tmp/setup-node-second-run.log
             grep -q "from cache" /tmp/setup-node-second-run.log
             test -d "$SETUP_NODE_NPM_APP/node_modules/is-odd"
 
