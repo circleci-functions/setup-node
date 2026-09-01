@@ -84,7 +84,7 @@ func (c *installCmd) Run(ctx context.Context, client *sdk.Client) error {
 
 		if lockfile, err := os.ReadFile(filepath.Join(c.AppDir, pm.Lockfile())); err == nil { //nolint:gosec // lockfile name is one of a fixed set of known filenames
 			cacheKey = fmt.Sprintf("setup-node-packages-v1-%s-%s-%s-%x", runtime.GOOS, runtime.GOARCH, pm, sha256.Sum256(lockfile))
-			_, err := client.RestoreCache(ctx, []string{cacheKey})
+			_, err := client.RestoreCache(ctx, []string{cacheKey}, sdk.WithStepName(fmt.Sprintf("Restoring %s cache", pm)))
 			sdk.LogCacheErr("restore", err)
 			// RestoreCache reports "success" even on a miss, so the only way to
 			// tell a hit apart is to check whether it actually populated cacheDir.
@@ -102,7 +102,7 @@ func (c *installCmd) Run(ctx context.Context, client *sdk.Client) error {
 
 	if c.WithCache {
 		if cacheKey != "" {
-			sdk.LogCacheErr("save", client.SaveCache(ctx, cacheKey, []string{cacheDir}))
+			sdk.LogCacheErr("save", client.SaveCache(ctx, cacheKey, []string{cacheDir}, sdk.WithStepName(fmt.Sprintf("Saving %s cache", pm))))
 		}
 
 		if err := bashenv.ExportEnvVars(map[string]string{
