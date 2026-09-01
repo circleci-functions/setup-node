@@ -52,7 +52,7 @@ lockfile refreshes the cache on its own.
 The cache directory is also exported to `$BASH_ENV`, so later steps that run the
 package manager read and write the same cache.
 
-Turn caching off with `--no-with-cache`. Cache problems never fail the job, and
+Turn caching off with `--cache=false`. Cache problems never fail the job, and
 if the lockfile can't be read (e.g. a `bun.lockb`-only repo, or
 `--override-command` with nothing checked out) caching is skipped with a warning
 while the install still runs.
@@ -64,7 +64,7 @@ while the install still runs.
 | `--app-dir` | `.` | Directory containing `package.json` and the lockfile |
 | `--package-manager` | (auto) | `npm`, `yarn`, `pnpm` or `bun`. Auto-detected from the lockfile if omitted. |
 | `--override-command` | (empty) | Replace the default frozen install command |
-| `--with-cache` | true | Set `--no-with-cache` to disable caching |
+| `--cache` | true | Set `--cache=false` to disable caching |
 
 ## Platform support
 

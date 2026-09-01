@@ -1,5 +1,5 @@
 // Command setup-node detects the Node.js package manager in use
-// and runs the appropriate frozen/CI-safe install command. When --with-cache
+// and runs the appropriate frozen/CI-safe install command. When --cache
 // is set (the default), it restores the package manager's cache directory
 // from the CircleCI job cache (keyed on the lockfile contents) before
 // installing, saves it back afterwards, and exports the cache directory to
@@ -30,7 +30,7 @@ type cli struct {
 	AppDir          string `help:"Directory containing package.json." default:"."`
 	PackageManager  string `help:"Package manager to use: npm, yarn, pnpm, or bun. Auto-detected from lockfile if omitted." enum:"npm,yarn,pnpm,bun," default:""`
 	OverrideCommand string `help:"Override the default CI install command (e.g. 'npm install --legacy-peer-deps')."`
-	WithCache       bool   `help:"Export the package manager cache path to $BASH_ENV." default:"true" negatable:""`
+	Cache           bool   `help:"Restore the package manager cache before installing and save it at the end, and export its path to $BASH_ENV. Set to false to disable caching." default:"true"`
 }
 
 // toUnixPath converts a native path to the Unix-style path that MSYS2/Git Bash
@@ -72,7 +72,7 @@ func (c *cli) Run(ctx context.Context, client *sdk.Client) error {
 	// can't be read, e.g. a bun.lockb-only repo or an --override-command run
 	// with no lockfile at all.
 	var cacheKey, cacheDir string
-	if c.WithCache {
+	if c.Cache {
 		cacheDir, err = pm.CacheDir(ctx)
 		if err != nil {
 			return fmt.Errorf("resolve cache dirs: %w", err)
@@ -96,7 +96,7 @@ func (c *cli) Run(ctx context.Context, client *sdk.Client) error {
 		return err
 	}
 
-	if c.WithCache {
+	if c.Cache {
 		if cacheKey != "" {
 			sdk.LogCacheErr("save", client.SaveCache(ctx, cacheKey, []string{cacheDir}, sdk.WithStepName(fmt.Sprintf("Saving %s cache", pm))))
 		}
