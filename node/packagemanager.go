@@ -102,7 +102,10 @@ func (pm PackageManager) Binary() string {
 
 // CacheDir returns the filesystem paths that should be cached for pm.
 // For pnpm and yarn it may invoke the binary to resolve the store/cache path.
-func (pm PackageManager) CacheDir(ctx context.Context) (string, error) {
+// CacheDir returns the directory pm caches downloads in, asked of pm itself
+// where pm will answer. appDir is the project directory: bun only reports its
+// cache from inside one, and a project's own config can move yarn's or pnpm's.
+func (pm PackageManager) CacheDir(ctx context.Context, appDir string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("home dir: %w", err)
@@ -118,7 +121,7 @@ func (pm PackageManager) CacheDir(ctx context.Context) (string, error) {
 
 	case Yarn:
 		// Ask yarn where its cache lives.
-		out, err := exec.CommandContext(ctx, "yarn", "cache", "dir").Output()
+		out, err := inDir(exec.CommandContext(ctx, "yarn", "cache", "dir"), appDir).Output()
 		if err != nil {
 			// Fall back to the conventional default.
 			if runtime.GOOS == "windows" {
@@ -133,18 +136,37 @@ func (pm PackageManager) CacheDir(ctx context.Context) (string, error) {
 		return strings.TrimSpace(string(out)), nil
 
 	case PNPM:
-		out, err := exec.CommandContext(ctx, "pnpm", "store", "path").Output()
+		out, err := inDir(exec.CommandContext(ctx, "pnpm", "store", "path"), appDir).Output()
 		if err != nil {
 			return "", fmt.Errorf("pnpm store path: %w", err)
 		}
 		return strings.TrimSpace(string(out)), nil
 
 	case Bun:
+		// Ask bun: it resolves $BUN_INSTALL_CACHE_DIR, then
+		// $XDG_CACHE_HOME/.bun/install/cache, then ~/.bun/install/cache, and
+		// only the last of those is what a hardcoded path gets right.
+		out, err := inDir(exec.CommandContext(ctx, "bun", "pm", "cache"), appDir).Output()
+		if err == nil {
+			if dir := strings.TrimSpace(string(out)); dir != "" {
+				return dir, nil
+			}
+		}
+		if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" {
+			return filepath.Join(xdg, ".bun", "install", "cache"), nil
+		}
 		return filepath.Join(home, ".bun", "install", "cache"), nil
 
 	default:
 		return "", fmt.Errorf("unknown package manager: %s", pm)
 	}
+}
+
+// inDir runs cmd from dir, so a package manager answers for the project rather
+// than for wherever the function happens to be running.
+func inDir(cmd *exec.Cmd, dir string) *exec.Cmd {
+	cmd.Dir = dir
+	return cmd
 }
 
 // InstallPackages executes the command to install packages in appDir.

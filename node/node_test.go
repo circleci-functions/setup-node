@@ -3,6 +3,7 @@ package node_test
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -79,7 +80,7 @@ func TestCacheDirs_NPM(t *testing.T) {
 	t.Run("uses NPM_CONFIG_CACHE env var", func(t *testing.T) {
 		t.Setenv("NPM_CONFIG_CACHE", "/test/custom-npm-cache")
 
-		dir, err := node.NPM.CacheDir(ctx)
+		dir, err := node.NPM.CacheDir(ctx, t.TempDir())
 		assert.NilError(t, err)
 		assert.Equal(t, dir, "/test/custom-npm-cache")
 	})
@@ -87,8 +88,24 @@ func TestCacheDirs_NPM(t *testing.T) {
 	t.Run("falls back to ~/.npm when env var unset", func(t *testing.T) {
 		t.Setenv("NPM_CONFIG_CACHE", "")
 
-		dir, err := node.NPM.CacheDir(ctx)
+		dir, err := node.NPM.CacheDir(ctx, t.TempDir())
 		assert.NilError(t, err)
 		assert.Assert(t, strings.HasSuffix(dir, ".npm"), "expected path ending in .npm, got %s", dir)
 	})
+}
+
+// bun resolves its cache from $BUN_INSTALL_CACHE_DIR, then $XDG_CACHE_HOME,
+// then $HOME — so a path built from $HOME alone is wrong whenever
+// XDG_CACHE_HOME is set, which is what a test sandbox does.
+func TestCacheDirs_Bun_HonoursXDGCacheHome(t *testing.T) {
+	if _, err := exec.LookPath("bun"); err == nil {
+		t.Skip("bun is installed, so it answers for itself; this covers the fallback")
+	}
+
+	xdg := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", xdg)
+
+	dir, err := node.Bun.CacheDir(context.Background(), t.TempDir())
+	assert.NilError(t, err)
+	assert.Equal(t, dir, filepath.Join(xdg, ".bun", "install", "cache"))
 }
