@@ -73,7 +73,7 @@ func (c *cli) Run(ctx context.Context, client *sdk.Client) error {
 	// with no lockfile at all.
 	var cacheKey, cacheDir string
 	if c.Cache {
-		cacheDir, err = pm.CacheDir(ctx)
+		cacheDir, err = pm.CacheDir(ctx, appDir)
 		if err != nil {
 			return fmt.Errorf("resolve cache dirs: %w", err)
 		}
