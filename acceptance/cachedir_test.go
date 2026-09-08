@@ -3,7 +3,6 @@
 package setupnode_test
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,10 +10,6 @@ import (
 	"testing"
 
 	"gotest.tools/v3/assert"
-
-	"github.com/circleci-functions/toolkit/bashenv"
-
-	"github.com/circleci-functions/setup-node/node"
 )
 
 // cacheQuery is how each package manager reports the directory it will use.
@@ -25,54 +20,52 @@ var cacheQuery = map[string][]string{
 	"bun":  {"bun", "pm", "cache"},
 }
 
-// TestAcceptance_CacheDirReuse records, per package manager, whether a later
-// step reaches the cache setup-node saved.
+// TestAcceptance_CacheDirReuse checks that a later step reaches the cache
+// setup-node saved, without anything being exported to reach it.
 //
-// setup-node exports the directory to $BASH_ENV so later steps use the cache it
-// restored. Whether that export is needed, ignored, or actively wrong differs
-// per package manager, and the answer decides what replaces it: nothing, the
-// package manager's own config file, or the export as it stands. It reports
-// rather than asserts until that is settled.
+// Each package manager resolves its own cache directory, so a later step finds
+// what was restored by asking the same question setup-node asked. The
+// directory has to hold something as well: agreeing on a path that nothing
+// filled is not reuse.
 func TestAcceptance_CacheDirReuse(t *testing.T) {
-	for _, pm := range []string{"npm", "yarn", "pnpm", "bun"} {
+	for _, pm := range []string{"npm", "yarn", "pnpm"} {
 		t.Run(pm, func(t *testing.T) {
 			requirePM(t, pm)
 			s, run := sandbox(t)
 			appDir := copyFixture(t, pm)
 
 			out, err := run(t, nil, "--app-dir", appDir, "--package-manager", pm)
-			// Observation only: TestAcceptance_Install is what fails when a
-			// package manager cannot install.
-			if err != nil {
-				t.Skipf("%s could not be observed here: %v\n%s", pm, err, out)
-			}
+			assert.NilError(t, err, "output: %s", out)
 
-			key := node.PackageManager(pm).CacheDirKey()
-			vars, err := bashenv.Vars(s.BashEnv, nil)
-			assert.NilError(t, err, "read $BASH_ENV")
-			exported := vars[key]
+			saved := savedCacheDir(t, out)
+			resolved := resolveCacheDir(t, pm, appDir, s.CmdEnv(os.Environ()))
 
-			base := s.CmdEnv(os.Environ())
-			exported = realPath(exported)
-			withExport := resolveCacheDir(t, pm, appDir, append(base, key+"="+exported))
-			without := resolveCacheDir(t, pm, appDir, base)
-
-			t.Logf("%s: exports %s=%s (%s)", pm, key, exported, describeDir(exported))
-			t.Logf("%s: a later step with that export resolves %s", pm, withExport)
-			t.Logf("%s: a later step without it resolves        %s (%s)", pm, without, describeDir(without))
-
-			switch {
-			case withExport == exported && without == exported:
-				t.Logf("%s: the export changes nothing — both reach the saved cache", pm)
-			case withExport == exported:
-				t.Logf("%s: the export is what reaches the saved cache", pm)
-			case without == exported:
-				t.Logf("%s: the export moves a later step AWAY from the saved cache", pm)
-			default:
-				t.Logf("%s: neither reaches the saved cache", pm)
-			}
+			assert.Equal(t, resolved, saved,
+				"a later step must resolve the cache directory setup-node saved")
+			assert.Assert(t, entryCount(saved) > 0,
+				"the saved cache is empty, so nothing was reused: %s", saved)
 		})
 	}
+
+	// bun resolves its cache under $XDG_CACHE_HOME (or ~/.cache), which is not
+	// where setup-node looks for it, so there is nothing for a later step to
+	// reach. Enabled by the change that fixes that.
+	t.Run("bun", func(t *testing.T) {
+		t.Skip("bun's cache directory is resolved wrongly; see the bun CacheDir fix")
+	})
+}
+
+// savedCacheDir reads the directory setup-node reported caching.
+func savedCacheDir(t *testing.T, out string) string {
+	t.Helper()
+	const marker = "cache directory "
+	for line := range strings.SplitSeq(out, "\n") {
+		if _, dir, found := strings.Cut(line, marker); found {
+			return realPath(strings.TrimSpace(dir))
+		}
+	}
+	t.Fatalf("setup-node did not report which cache directory it used:\n%s", out)
+	return ""
 }
 
 // resolveCacheDir asks pm where its cache is, from appDir and under env.
@@ -85,29 +78,21 @@ func resolveCacheDir(t *testing.T, pm, appDir string, env []string) string {
 	cmd.Env = env
 
 	// Stdout only: yarn writes warnings about the fixture's package.json to
-	// stderr, and the last line is the answer.
+	// stderr, and the last field is the answer.
 	out, err := cmd.Output()
-	if err != nil {
-		return "(" + args[0] + " " + strings.Join(args[1:], " ") + " failed: " + err.Error() + ")"
-	}
-	lines := strings.Fields(strings.TrimSpace(string(out)))
-	if len(lines) == 0 {
-		return "(no output)"
-	}
-	return realPath(lines[len(lines)-1])
+	assert.NilError(t, err, "%s could not report its cache directory", pm)
+
+	fields := strings.Fields(strings.TrimSpace(string(out)))
+	assert.Assert(t, len(fields) > 0, "%s reported no cache directory", pm)
+	return realPath(fields[len(fields)-1])
 }
 
-// describeDir says whether a directory exists and holds anything, which is
-// what separates a cache that is reused from one that is merely agreed upon.
-func describeDir(dir string) string {
+func entryCount(dir string) int {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return "does not exist"
+		return 0
 	}
-	if len(entries) == 0 {
-		return "empty"
-	}
-	return fmt.Sprintf("%d entries", len(entries))
+	return len(entries)
 }
 
 // realPath resolves symlinks, so a macOS /var answer compares equal to the

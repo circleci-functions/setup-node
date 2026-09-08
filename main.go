@@ -2,8 +2,10 @@
 // and runs the appropriate frozen/CI-safe install command. When --cache
 // is set (the default), it restores the package manager's cache directory
 // from the CircleCI job cache (keyed on the lockfile contents) before
-// installing, saves it back afterwards, and exports the cache directory to
-// $BASH_ENV so that later steps can locate it too.
+// installing, and saves it back afterwards.
+//
+// Later steps need nothing exported: each package manager resolves the same
+// cache directory on its own.
 //
 // Supported platforms: linux, darwin, and windows.
 package main
@@ -15,11 +17,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"github.com/alecthomas/kong"
 
-	"github.com/circleci-functions/toolkit/bashenv"
 	"github.com/circleci-functions/toolkit/functionyaml"
 	"github.com/circleci-functions/toolkit/sdk"
 
@@ -30,22 +30,7 @@ type cli struct {
 	AppDir          string `help:"Directory containing package.json." default:"."`
 	PackageManager  string `help:"Package manager to use: npm, yarn, pnpm, or bun. Auto-detected from lockfile if omitted." enum:"npm,yarn,pnpm,bun," default:""`
 	OverrideCommand string `help:"Override the default CI install command (e.g. 'npm install --legacy-peer-deps')."`
-	Cache           bool   `help:"Restore the package manager cache before installing and save it at the end, and export its path to $BASH_ENV. Set to false to disable caching." default:"true"`
-}
-
-// toUnixPath converts a native path to the Unix-style path that MSYS2/Git Bash
-// expects in $BASH_ENV. On non-Windows it is a no-op.
-// Example: C:\Users\foo → /c/Users/foo
-func toUnixPath(path string) string {
-	if runtime.GOOS != "windows" {
-		return path
-	}
-	p := filepath.ToSlash(path)
-	if len(p) >= 2 && p[1] == ':' {
-		drive := strings.ToLower(string(p[0]))
-		p = "/" + drive + p[2:]
-	}
-	return p
+	Cache           bool   `help:"Restore the package manager cache before installing and save it at the end. Set to false to disable caching." default:"true"`
 }
 
 func (c *cli) Run(ctx context.Context, client *sdk.Client) error {
@@ -77,6 +62,10 @@ func (c *cli) Run(ctx context.Context, client *sdk.Client) error {
 		if err != nil {
 			return fmt.Errorf("resolve cache dirs: %w", err)
 		}
+		// Worth reading even on a pass: a later step reaches this by asking the
+		// package manager the same question, so a wrong answer here is a cache
+		// that never gets used.
+		fmt.Fprintf(os.Stderr, "setup-node: %s cache directory %s\n", pm, cacheDir)
 
 		if lockfile, err := os.ReadFile(filepath.Join(c.AppDir, pm.Lockfile())); err == nil { //nolint:gosec // lockfile name is one of a fixed set of known filenames
 			cacheKey = fmt.Sprintf("setup-node-packages-v1-%s-%s-%s-%x", runtime.GOOS, runtime.GOARCH, pm, sha256.Sum256(lockfile))
@@ -96,17 +85,8 @@ func (c *cli) Run(ctx context.Context, client *sdk.Client) error {
 		return err
 	}
 
-	if c.Cache {
-		if cacheKey != "" {
-			sdk.LogCacheErr("save", client.SaveCache(ctx, cacheKey, []string{cacheDir}, sdk.WithStepName(fmt.Sprintf("Saving %s cache", pm))))
-		}
-
-		if err := bashenv.ExportEnvVars(map[string]string{
-			pm.CacheDirKey(): toUnixPath(cacheDir),
-		}); err != nil {
-			return fmt.Errorf("write cache env: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "setup-node: wrote cache env exports to %s\n", os.Getenv("BASH_ENV"))
+	if c.Cache && cacheKey != "" {
+		sdk.LogCacheErr("save", client.SaveCache(ctx, cacheKey, []string{cacheDir}, sdk.WithStepName(fmt.Sprintf("Saving %s cache", pm))))
 	}
 
 	return nil
@@ -133,7 +113,7 @@ func run(ctx context.Context, client *sdk.Client) error {
 	var flags cli
 	kCtx := kong.Parse(&flags,
 		kong.Name("setup-node"),
-		kong.Description("Install Node.js packages and export cache paths to $BASH_ENV.\n\nExample:\n  circleci run setup-node@<version> -- --app-dir ./frontend"),
+		kong.Description("Install Node.js packages, caching what the package manager downloads.\n\nExample:\n  circleci run setup-node@<version> -- --app-dir ./frontend"),
 		kong.UsageOnError(),
 		functionyaml.Embed(),
 	)

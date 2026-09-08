@@ -9,20 +9,16 @@ import (
 	"testing"
 
 	"gotest.tools/v3/assert"
-
-	"github.com/circleci-functions/toolkit/bashenv"
-
-	"github.com/circleci-functions/setup-node/node"
 )
 
 // TestAcceptance_Install runs a real frozen install for each package manager
-// against the registry, then checks the packages landed and the package
-// manager's cache directory was exported to $BASH_ENV for later job steps.
+// against the registry and checks the packages landed. Whether a later step
+// reaches the cache is TestAcceptance_CacheDirReuse's job.
 func TestAcceptance_Install(t *testing.T) {
 	for _, pm := range []string{"npm", "yarn", "pnpm", "bun"} {
 		t.Run(pm, func(t *testing.T) {
 			requirePM(t, pm)
-			s, run := sandbox(t)
+			_, run := sandbox(t)
 			appDir := copyFixture(t, pm)
 
 			out, err := run(t, nil, "--app-dir", appDir, "--package-manager", pm)
@@ -30,14 +26,6 @@ func TestAcceptance_Install(t *testing.T) {
 
 			_, statErr := os.Stat(filepath.Join(appDir, "node_modules", "is-odd"))
 			assert.NilError(t, statErr, "expected node_modules/is-odd after install")
-
-			key := node.PackageManager(pm).CacheDirKey()
-			vars, err := bashenv.Vars(s.BashEnv, nil)
-			assert.NilError(t, err, "read $BASH_ENV")
-			cacheDir, ok := vars[key]
-			assert.Assert(t, ok, "expected %s exported to $BASH_ENV; got: %v", key, vars)
-			assert.Assert(t, strings.HasPrefix(cacheDir, s.Home),
-				"expected %s to point under the sandbox home %q; got %q", key, s.Home, cacheDir)
 		})
 	}
 }

@@ -100,8 +100,8 @@ jobs:
             TOOLKIT_CACHE_MODE: live
 
   # The one property the in-process acceptance suite can't prove: the shipped
-  # cross-compiled artifact installs for real, and the cache-dir export it
-  # writes is sourced from $BASH_ENV into a later step by the real job runner.
+  # cross-compiled artifact installs for real, and a later step reaches the
+  # cache it saved without anything being sourced from a shell.
   smoke-test:
     executor: base
     steps:
@@ -123,13 +123,17 @@ jobs:
             "$BIN" --app-dir "$APP" --package-manager npm
             test -d "$APP/node_modules/is-odd"
       - run:
-          name: Assert NPM_CONFIG_CACHE exported to $BASH_ENV
-          command: .circleci/scripts/assert_exported.sh NPM_CONFIG_CACHE
+          name: A later step finds the cache npm filled, unaided
+          command: |
+            CACHE=$(npm config get cache)
+            echo "npm resolves $CACHE"
+            test -d "$CACHE"
+            test -n "$(ls -A "$CACHE")"
       - run:
           name: Install packages with npm (expect cache hit)
           command: |
             BIN="$PWD/dist/setup-node/linux/amd64/setup-node"
-            rm -rf "$NPM_CONFIG_CACHE" "$SETUP_NODE_NPM_APP/node_modules"
+            rm -rf "$(npm config get cache)" "$SETUP_NODE_NPM_APP/node_modules"
             "$BIN" --app-dir "$SETUP_NODE_NPM_APP" --package-manager npm 2>&1 | tee /tmp/setup-node-second-run.log
             grep -q "from cache" /tmp/setup-node-second-run.log
             test -d "$SETUP_NODE_NPM_APP/node_modules/is-odd"
