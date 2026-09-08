@@ -3,6 +3,7 @@
 package setupnode_test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,9 +57,9 @@ func TestAcceptance_CacheDirReuse(t *testing.T) {
 			withExport := resolveCacheDir(t, pm, appDir, append(base, key+"="+exported))
 			without := resolveCacheDir(t, pm, appDir, base)
 
-			t.Logf("%s: exports %s=%s", pm, key, exported)
+			t.Logf("%s: exports %s=%s (%s)", pm, key, exported, describeDir(exported))
 			t.Logf("%s: a later step with that export resolves %s", pm, withExport)
-			t.Logf("%s: a later step without it resolves        %s", pm, without)
+			t.Logf("%s: a later step without it resolves        %s (%s)", pm, without, describeDir(without))
 
 			switch {
 			case withExport == exported && without == exported:
@@ -94,6 +95,19 @@ func resolveCacheDir(t *testing.T, pm, appDir string, env []string) string {
 		return "(no output)"
 	}
 	return realPath(lines[len(lines)-1])
+}
+
+// describeDir says whether a directory exists and holds anything, which is
+// what separates a cache that is reused from one that is merely agreed upon.
+func describeDir(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "does not exist"
+	}
+	if len(entries) == 0 {
+		return "empty"
+	}
+	return fmt.Sprintf("%d entries", len(entries))
 }
 
 // realPath resolves symlinks, so a macOS /var answer compares equal to the
