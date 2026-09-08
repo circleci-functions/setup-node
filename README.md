@@ -12,8 +12,8 @@ steps:
 ```
 
 setup-node detects the package manager from your lockfile, runs a frozen
-install, and exports the package manager's cache directory to `$BASH_ENV` — so
-later steps that run the package manager pick up the same cache automatically.
+install, and caches what the package manager downloads — so later steps that
+run the package manager pick up the same cache automatically.
 
 ## Choosing a package manager
 
@@ -49,8 +49,9 @@ directory before installing and saves it back afterwards, keyed on the OS,
 architecture, package manager and a checksum of the lockfile — so a changed
 lockfile refreshes the cache on its own.
 
-The cache directory is also exported to `$BASH_ENV`, so later steps that run the
-package manager read and write the same cache.
+Nothing is exported to `$BASH_ENV`: each package manager resolves the same
+cache directory on its own, so later steps read and write it whatever shell
+they run in.
 
 Turn caching off with `--cache=false`. Cache problems never fail the job, and
 if the lockfile can't be read (e.g. a `bun.lockb`-only repo, or
