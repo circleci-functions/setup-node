@@ -5,7 +5,6 @@ package setupnode_test
 import (
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -48,13 +47,4 @@ func TestAcceptance_BunCacheDirIsWhatBunUses(t *testing.T) {
 	entries, err := os.ReadDir(computed)
 	assert.NilError(t, err, "bun's cache directory should exist after an install")
 	assert.Assert(t, len(entries) > 0, "bun's cache directory is empty, so nothing was cached")
-}
-
-// realPath resolves symlinks, so a macOS /var answer compares equal to the
-// /private/var it points at.
-func realPath(p string) string {
-	if r, err := filepath.EvalSymlinks(p); err == nil {
-		return r
-	}
-	return p
 }

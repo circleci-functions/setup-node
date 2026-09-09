@@ -5,7 +5,6 @@ package setupnode_test
 import (
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -28,7 +27,7 @@ var cacheQuery = map[string][]string{
 // directory has to hold something as well: agreeing on a path that nothing
 // filled is not reuse.
 func TestAcceptance_CacheDirReuse(t *testing.T) {
-	for _, pm := range []string{"npm", "yarn", "pnpm"} {
+	for _, pm := range []string{"npm", "yarn", "pnpm", "bun"} {
 		t.Run(pm, func(t *testing.T) {
 			requirePM(t, pm)
 			s, run := sandbox(t)
@@ -46,13 +45,6 @@ func TestAcceptance_CacheDirReuse(t *testing.T) {
 				"the saved cache is empty, so nothing was reused: %s", saved)
 		})
 	}
-
-	// bun resolves its cache under $XDG_CACHE_HOME (or ~/.cache), which is not
-	// where setup-node looks for it, so there is nothing for a later step to
-	// reach. Enabled by the change that fixes that.
-	t.Run("bun", func(t *testing.T) {
-		t.Skip("bun's cache directory is resolved wrongly; see the bun CacheDir fix")
-	})
 }
 
 // savedCacheDir reads the directory setup-node reported caching.
@@ -93,13 +85,4 @@ func entryCount(dir string) int {
 		return 0
 	}
 	return len(entries)
-}
-
-// realPath resolves symlinks, so a macOS /var answer compares equal to the
-// /private/var it points at.
-func realPath(p string) string {
-	if r, err := filepath.EvalSymlinks(p); err == nil {
-		return r
-	}
-	return p
 }
