@@ -144,3 +144,12 @@ func copyFixtureInto(t *testing.T, pm, dst string) {
 		assert.NilError(t, os.WriteFile(filepath.Join(dst, e.Name()), data, 0600))
 	}
 }
+
+// realPath resolves symlinks, so a macOS /var answer compares equal to the
+// /private/var it points at.
+func realPath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return p
+}
