@@ -25,7 +25,7 @@ func TestAcceptance_BunCacheDirIsWhatBunUses(t *testing.T) {
 	s, run := sandbox(t)
 	appDir := copyFixture(t, "bun")
 
-	out, err := run(t, nil, "--app-dir", appDir, "--package-manager", "bun")
+	out, err := run(t, nil, "install-packages", "--app-dir", appDir, "--package-manager", "bun")
 	assert.NilError(t, err, "output: %s", out)
 
 	// The binary ran in the sandbox, so put this process there too: the answer
