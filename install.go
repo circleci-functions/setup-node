@@ -20,7 +20,7 @@ type installCmd struct {
 	NodeVersion     string `help:"Node.js version to install: an exact or partial version (22, 22.11.0), a semver range (>=20 <23), lts/*, lts/<codename>, lts/-n, or latest. Defaults to .nvmrc, then .node-version, then lts/*."`
 	NodeVersionFile string `help:"File to read the Node.js version from: .nvmrc, .node-version, .tool-versions, mise.toml or package.json." type:"path"`
 	Mirror          string `help:"Base URL of a server laid out like https://nodejs.org/dist to download Node.js from." default:"https://nodejs.org/dist"`
-	MirrorToken     string `help:"Authorization header value to send to --mirror." env:"NODE_MIRROR_TOKEN"`
+	MirrorToken     string `help:"Authorization header value to send to --mirror. The token can also be set via the NODE_MIRROR_TOKEN env var." env:"NODE_MIRROR_TOKEN"`
 	Cache           bool   `help:"Restore the Node.js install from the job cache, and save it after a fresh download. Set to false to disable caching." default:"true"`
 	InstallDir      string `help:"Directory to install Node.js versions under." default:"~/.cache/setup-node" hidden:""`
 	BinDir          string `help:"Link node, npm and npx into this directory instead of discovering one on PATH." type:"path" hidden:""`
