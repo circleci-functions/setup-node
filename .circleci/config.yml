@@ -1,7 +1,6 @@
 version: 2.1
 
 orbs:
-  node: circleci/node@7.2.1
   toolkit: https://raw.githubusercontent.com/circleci-functions/toolkit/refs/heads/main/orbs/toolkit.yml
 
 parameters:
@@ -9,7 +8,7 @@ parameters:
     type: string
     default: "26.4.0"
     description: >-
-      Node.js version for the acceptance tests to install.
+      Node.js version for the acceptance and smoke tests to install.
   bun-version:
     type: string
     default: "1.3.14"
@@ -30,10 +29,80 @@ executors:
   go:
     docker:
       - image: cimg/go:1.26
-  # smoke-test execs the binary `build` cross-compiled, on an image with no Go.
+  # The smoke jobs exec the binary `build` cross-compiled. cimg/base has no Go
+  # and no Node.js; the arm64, macOS and Windows images come with a Node.js of
+  # their own, so they also cover getting ahead of one.
   base:
     docker:
       - image: cimg/base:stable
+  arm64:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: arm.medium
+  macos:
+    macos:
+      xcode: "16.4.0"
+  windows:
+    machine:
+      image: windows-server-2022-gui:current
+      shell: bash.exe -eo pipefail
+    resource_class: windows.medium
+
+commands:
+  smoke-node:
+    description: >-
+      Install Node.js with the cross-compiled binary, then check from later
+      steps, which source nothing, that node, npm and npx resolve to the
+      install and that npm install -g lands on PATH.
+    parameters:
+      platform:
+        type: string
+        description: The os/arch whose binary to run, e.g. linux/amd64.
+      ext:
+        type: string
+        default: ""
+        description: Executable suffix for the platform.
+      node-version:
+        type: string
+        default: << pipeline.parameters.node-version >>
+    steps:
+      - run:
+          name: Install Node.js
+          command: |
+            ./dist/setup-node/<< parameters.platform >>/setup-node<< parameters.ext >> \
+              --node-version "<< parameters.node-version >>" 2>&1 | tee setup-node.log
+            sed -n 's/.* to Node.js \(v[0-9.]*\) .*/\1/p' setup-node.log > expected-node-version
+            test -s expected-node-version
+      - run:
+          name: A later step resolves node, npm and npx
+          command: |
+            command -v node npm npx
+            echo "node $(node --version), npm $(npm --version), npx $(npx --version)"
+            test "$(node --version)" = "$(cat expected-node-version)"
+      - run:
+          name: npm install -g
+          command: npm install --global semver@7.6.3
+      - run:
+          name: A later step runs what npm install -g installed
+          command: |
+            if ! command -v semver; then
+              cat setup-node.log
+              echo "PATH: $PATH"
+              echo "npm global prefix: $(npm config get prefix)"
+              ls -la "$(npm config get prefix)"
+              exit 1
+            fi
+            test "$(semver 1.2.3)" = "1.2.3"
+      - run:
+          name: Install packages with npm
+          command: |
+            mkdir -p smoke-app
+            cd smoke-app
+            printf '{\n  "dependencies": {\n    "is-odd": "^3.0.1"\n  }\n}\n' > package.json
+            npm install --package-lock-only
+            ../dist/setup-node/<< parameters.platform >>/setup-node<< parameters.ext >> \
+              install-packages --package-manager npm
+            test -d node_modules/is-odd
 
 jobs:
   test:
@@ -70,26 +139,27 @@ jobs:
           paths:
             - dist
 
-  # Real registry installs and a real task-agent cache. Runs on the go executor
-  # because the suite compiles setup-node in TestMain; node/install puts the
-  # four package managers on PATH so the install matrix runs for real.
+  # Real nodejs.org downloads, real registry installs and a real task-agent
+  # cache. Runs on the go executor because the suite compiles setup-node in
+  # TestMain. setup-node itself installs Node.js, and the other three package
+  # managers come from npm install -g, so the install matrix runs for real.
   acceptance:
     executor: go
     steps:
       - checkout
       - toolkit/private-mod-init
-      - node/install:
-          node-version: << pipeline.parameters.node-version >>
-          install-bun: true
-          bun-version: << pipeline.parameters.bun-version >>
-          install-pnpm: true
-          pnpm-version: << pipeline.parameters.pnpm-version >>
-          install-yarn: true
-          yarn-version: << pipeline.parameters.yarn-version >>
       - restore_cache:
           keys:
             - setup-node-go-{{ checksum "go.sum" }}-
             - setup-node-go-
+      - run:
+          name: Install Node.js and package managers
+          command: |
+            go run . --node-version << pipeline.parameters.node-version >>
+            npm install --global \
+              bun@<< pipeline.parameters.bun-version >> \
+              pnpm@<< pipeline.parameters.pnpm-version >> \
+              yarn@<< pipeline.parameters.yarn-version >>
       - run:
           name: Run acceptance tests
           command: task acceptance
@@ -108,8 +178,9 @@ jobs:
       - checkout
       - attach_workspace:
           at: .
-      - node/install:
-          node-version: << pipeline.parameters.node-version >>
+      - run:
+          name: Install Node.js
+          command: ./dist/setup-node/linux/amd64/setup-node --node-version << pipeline.parameters.node-version >>
       - run:
           name: Install packages with npm
           command: |
@@ -137,6 +208,29 @@ jobs:
             "$BIN" install-packages --app-dir "$SETUP_NODE_NPM_APP" --package-manager npm 2>&1 | tee /tmp/setup-node-second-run.log
             grep -q "from cache" /tmp/setup-node-second-run.log
             test -d "$SETUP_NODE_NPM_APP/node_modules/is-odd"
+
+  # Each runs the cross-compiled binary on an executor where PATH, linking and
+  # the Node.js build differ.
+  smoke-node:
+    parameters:
+      executor:
+        type: executor
+      platform:
+        type: string
+      ext:
+        type: string
+        default: ""
+      node-version:
+        type: string
+        default: << pipeline.parameters.node-version >>
+    executor: << parameters.executor >>
+    steps:
+      - attach_workspace:
+          at: .
+      - smoke-node:
+          platform: << parameters.platform >>
+          ext: << parameters.ext >>
+          node-version: << parameters.node-version >>
 
   publish:
     executor: go
@@ -182,8 +276,48 @@ workflows:
           filters:
             tags:
               only: /.*/
+      - smoke-node:
+          name: smoke-node-linux-amd64
+          executor: base
+          platform: linux/amd64
+          requires: [build]
+          filters:
+            tags:
+              only: /.*/
+      - smoke-node:
+          name: smoke-node-linux-arm64
+          executor: arm64
+          platform: linux/arm64
+          requires: [build]
+          filters:
+            tags:
+              only: /.*/
+      - smoke-node:
+          name: smoke-node-macos
+          executor: macos
+          platform: darwin/arm64
+          requires: [build]
+          filters:
+            tags:
+              only: /.*/
+      - smoke-node:
+          name: smoke-node-windows
+          executor: windows
+          platform: windows/amd64
+          ext: ".exe"
+          requires: [build]
+          filters:
+            tags:
+              only: /.*/
       - publish:
-          requires: [test, acceptance, smoke-test]
+          requires:
+            - test
+            - acceptance
+            - smoke-test
+            - smoke-node-linux-amd64
+            - smoke-node-linux-arm64
+            - smoke-node-macos
+            - smoke-node-windows
           context: [functions-publisher, github-readonly]
           filters:
             tags:
