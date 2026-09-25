@@ -59,11 +59,12 @@ func (c *installPackagesCmd) Run(ctx context.Context, client *sdk.Client) error 
 
 		if lockfile, err := os.ReadFile(filepath.Join(c.AppDir, pm.Lockfile())); err == nil { //nolint:gosec // lockfile name is one of a fixed set of known filenames
 			cacheKey = fmt.Sprintf("setup-node-packages-v1-%s-%s-%s-%x", runtime.GOOS, runtime.GOARCH, pm, sha256.Sum256(lockfile))
+			before := entryNames(cacheDir)
 			_, err := client.RestoreCache(ctx, []string{cacheKey}, sdk.WithStepName(fmt.Sprintf("Restoring %s cache", pm)))
 			sdk.LogCacheErr("restore", err)
 			// RestoreCache reports "success" even on a miss, so the only way to
-			// tell a hit apart is to check whether it actually populated cacheDir.
-			if entries, derr := os.ReadDir(cacheDir); err == nil && derr == nil && len(entries) > 0 {
+			// tell a hit apart is to check whether it actually added to cacheDir.
+			if err == nil && addedEntries(cacheDir, before) {
 				fmt.Fprintf(os.Stderr, "setup-node: restored %s from cache\n", cacheDir)
 			}
 		} else {
@@ -93,4 +94,24 @@ func (c *installPackagesCmd) resolvePackageManager() (node.PackageManager, error
 		return "", fmt.Errorf("no lockfile found in %s; use --package-manager to specify one explicitly", c.AppDir)
 	}
 	return pm, nil
+}
+
+// entryNames returns the names of dir's entries, empty if it cannot be read.
+func entryNames(dir string) map[string]bool {
+	names := map[string]bool{}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		names[e.Name()] = true
+	}
+	return names
+}
+
+// addedEntries reports whether dir now holds an entry that before did not.
+func addedEntries(dir string, before map[string]bool) bool {
+	for name := range entryNames(dir) {
+		if !before[name] {
+			return true
+		}
+	}
+	return false
 }
