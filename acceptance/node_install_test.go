@@ -75,12 +75,12 @@ func TestAcceptance_InstallNode(t *testing.T) {
 }
 
 // TestAcceptance_InstallNode_CacheRoundTrip restores the install from the cache
-// on a simulated fresh executor. The cache is in-memory for the same reason as
-// TestAcceptance_Smoke's: the key is write-once and stable across pipelines.
+// on a simulated fresh executor. The cache nonce keeps the cold install from
+// restoring an entry an earlier pipeline saved under the same write-once key.
 func TestAcceptance_InstallNode_CacheRoundTrip(t *testing.T) {
-	s, run := sandboxInMemory(t)
+	s, run := sandbox(t)
 	env, _ := laterStepPath(t, s)
-	args := []string{"--node-version", "22.12.0"}
+	args := []string{"--node-version", "22.12.0", "--cache-nonce", s.CacheKeyNonce}
 
 	out, err := run(t, env, args...)
 	assert.NilError(t, err, "output: %s", out)

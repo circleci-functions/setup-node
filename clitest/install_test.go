@@ -148,6 +148,19 @@ func TestCLI_Install_Cache(t *testing.T) {
 	assert.Equal(t, rec.saves[0].Name, "Saving Node.js v22.2.0")
 }
 
+func TestCLI_Install_CacheNonce(t *testing.T) {
+	srv, binDir := installEnv(t)
+	_, run := sandbox(t)
+	rec, pluginURL := newCacheRecorder(t)
+
+	out, err := run(t, map[string]string{"CIRCLECI_PLUGIN_URL": pluginURL}, "--node-version", "22", "--mirror", srv.URL, "--bin-dir", binDir, "--cache-nonce", "run-42")
+	assert.NilError(t, err, "output: %s", out)
+
+	wantKey := "setup-node-toolchain-v1-" + runtime.GOOS + "-" + runtime.GOARCH + "-v22.2.0-run-42"
+	assert.DeepEqual(t, rec.restores[0].Keys, []string{wantKey})
+	assert.Equal(t, rec.saves[0].Key, wantKey)
+}
+
 func TestCLI_Install_CacheDisabled(t *testing.T) {
 	srv, binDir := installEnv(t)
 	_, run := sandbox(t)
