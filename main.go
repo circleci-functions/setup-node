@@ -15,6 +15,7 @@ import (
 )
 
 type cli struct {
+	Install         installCmd         `cmd:"" default:"withargs" help:"Install Node.js and put node, npm and npx on PATH. Runs when no command is given."`
 	InstallPackages installPackagesCmd `cmd:"" help:"Install the project's dependencies with its package manager, caching what it downloads."`
 }
 
@@ -26,7 +27,7 @@ func run(ctx context.Context, client *sdk.Client) error {
 	var flags cli
 	kCtx := kong.Parse(&flags,
 		kong.Name("setup-node"),
-		kong.Description("Install Node.js packages, caching what the package manager downloads.\n\nExample:\n  circleci run github.com/circleci-functions/setup-node@<version> -- install-packages --app-dir ./frontend"),
+		kong.Description("Install Node.js, and optionally a project's dependencies, caching what each downloads.\n\nExamples:\n  circleci run github.com/circleci-functions/setup-node@<version> -- --node-version 22\n  circleci run github.com/circleci-functions/setup-node@<version> -- install-packages --app-dir ./frontend"),
 		kong.UsageOnError(),
 		functionyaml.Embed(),
 	)

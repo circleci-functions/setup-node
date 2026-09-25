@@ -1,0 +1,158 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/circleci-functions/toolkit/sdk"
+
+	"github.com/circleci-functions/setup-node/nodedist"
+	"github.com/circleci-functions/setup-node/nodepath"
+	"github.com/circleci-functions/setup-node/nodeversion"
+)
+
+// installCmd installs an official Node.js build for the running platform and
+// makes node, npm and npx resolvable by name for the rest of the job.
+type installCmd struct {
+	NodeVersion     string `help:"Node.js version to install: an exact or partial version (22, 22.11.0), a semver range (>=20 <23), lts/*, lts/<codename>, lts/-n, or latest. Defaults to .nvmrc, then .node-version, then lts/*."`
+	NodeVersionFile string `help:"File to read the Node.js version from: .nvmrc, .node-version, .tool-versions, mise.toml or package.json." type:"path"`
+	Mirror          string `help:"Base URL of a server laid out like https://nodejs.org/dist to download Node.js from." default:"https://nodejs.org/dist"`
+	MirrorToken     string `help:"Authorization header value to send to --mirror." env:"NODE_MIRROR_TOKEN"`
+	Cache           bool   `help:"Restore the Node.js install from the job cache, and save it after a fresh download. Set to false to disable caching." default:"true"`
+	InstallDir      string `help:"Directory to install Node.js versions under." default:"~/.cache/setup-node" hidden:""`
+	BinDir          string `help:"Link node, npm and npx into this directory instead of discovering one on PATH." type:"path" hidden:""`
+}
+
+func (c *installCmd) Run(ctx context.Context, client *sdk.Client) error {
+	spec, err := c.versionSpec()
+	if err != nil {
+		return err
+	}
+
+	platform, err := nodedist.Host()
+	if err != nil {
+		return err
+	}
+	dist := nodedist.New(ctx, c.Mirror, c.MirrorToken)
+	releases, err := dist.Index(ctx)
+	if err != nil {
+		return err
+	}
+	release, err := nodeversion.Resolve(spec, releases, platform.FileID())
+	if err != nil {
+		return fmt.Errorf("resolve Node.js version: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "setup-node: resolved %q to Node.js %s (%s)\n", spec, release.Version, platform)
+
+	installDir, err := expandHome(c.InstallDir)
+	if err != nil {
+		return err
+	}
+	root := filepath.Join(installDir, release.Version+"-"+platform.String())
+	if err := c.ensureInstalled(ctx, client, dist, release.Version, platform, root); err != nil {
+		return err
+	}
+
+	dir, err := nodepath.Link(nodepath.Options{Root: root, Version: release.Version, BinDir: c.BinDir})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "setup-node: Node.js %s installed at %s, linked into %s\n", release.Version, root, dir)
+
+	if prefix, err := nodepath.SetGlobalPrefix(root, dir); err != nil {
+		fmt.Fprintf(os.Stderr, "setup-node: warning: %v; executables from npm install -g will not be on PATH\n", err)
+	} else {
+		fmt.Fprintf(os.Stderr, "setup-node: npm install -g will install into %s\n", prefix)
+	}
+	return nil
+}
+
+// versionSpec picks the version spec from --node-version, --node-version-file,
+// or the default version files in the working directory, in that order.
+func (c *installCmd) versionSpec() (string, error) {
+	switch {
+	case c.NodeVersion != "":
+		if c.NodeVersionFile != "" {
+			fmt.Fprintf(os.Stderr, "setup-node: both --node-version and --node-version-file are set; using --node-version\n")
+		}
+		return c.NodeVersion, nil
+	case c.NodeVersionFile != "":
+		spec, err := nodeversion.FromFile(c.NodeVersionFile)
+		if err != nil {
+			return "", fmt.Errorf("node-version-file: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "setup-node: read Node.js version %q from %s\n", spec, c.NodeVersionFile)
+		return spec, nil
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	spec, source, err := nodeversion.Default(wd)
+	if err != nil {
+		return "", err
+	}
+	if source == "" {
+		fmt.Fprintf(os.Stderr, "setup-node: no --node-version, .nvmrc or .node-version; using %s\n", spec)
+	} else {
+		fmt.Fprintf(os.Stderr, "setup-node: read Node.js version %q from %s\n", spec, source)
+	}
+	return spec, nil
+}
+
+// ensureInstalled makes sure root holds the install of version, from an
+// earlier run, the job cache, or a fresh download, in that order of preference.
+func (c *installCmd) ensureInstalled(ctx context.Context, client *sdk.Client, dist *nodedist.Dist, version string, platform nodedist.Platform, root string) error {
+	if installed(root) {
+		return nil
+	}
+
+	key := toolchainCacheKey(version)
+	if c.Cache {
+		_, err := client.RestoreCache(ctx, []string{key}, sdk.WithStepName("Restoring Node.js "+version))
+		sdk.LogCacheErr("restore", err)
+		if installed(root) {
+			fmt.Fprintf(os.Stderr, "setup-node: restored Node.js %s from cache\n", version)
+			return nil
+		}
+	}
+
+	if err := dist.Install(ctx, version, platform, root); err != nil {
+		return err
+	}
+
+	if c.Cache {
+		sdk.LogCacheErr("save", client.SaveCache(ctx, key, []string{root}, sdk.WithStepName("Saving Node.js "+version)))
+	}
+	return nil
+}
+
+func toolchainCacheKey(version string) string {
+	return fmt.Sprintf("setup-node-toolchain-v1-%s-%s", sdk.OSArch(), version)
+}
+
+// expandHome resolves a leading ~ against $HOME. kong's path type resolves it
+// against the passwd entry instead, which ignores a redirected $HOME.
+func expandHome(path string) (string, error) {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return filepath.Abs(path)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, strings.TrimPrefix(path, "~")), nil
+}
+
+func installed(root string) bool {
+	node := filepath.Join(nodepath.BinDir(root), "node")
+	if _, err := os.Stat(node); err == nil {
+		return true
+	}
+	_, err := os.Stat(node + ".exe")
+	return err == nil
+}
