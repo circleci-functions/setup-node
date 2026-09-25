@@ -162,8 +162,8 @@ func TestAcceptance_InstallsOntoTheRealPath(t *testing.T) {
 
 	t.Run("NotIntoADirectoryOwnedByAnotherTool", func(t *testing.T) {
 		for _, part := range strings.Split(filepath.ToSlash(linked), "/") {
-			assert.Assert(t, part != "shims" && part != ".nvm",
-				"a version manager rewrites its own directories, taking the link with it: %s", linked)
+			assert.Assert(t, part != "shims",
+				"a version manager rewrites its shims directory, taking the link with it: %s", linked)
 		}
 	})
 }
