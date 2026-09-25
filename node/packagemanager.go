@@ -113,11 +113,7 @@ func (pm PackageManager) CacheDir(ctx context.Context, appDir string) (string, e
 
 	switch pm {
 	case NPM:
-		// npm respects NPM_CONFIG_CACHE env var; fall back to ~/.npm.
-		if v := os.Getenv("NPM_CONFIG_CACHE"); v != "" {
-			return v, nil
-		}
-		return filepath.Join(home, ".npm"), nil
+		return npmCacheDir(ctx, appDir, home), nil
 
 	case Yarn:
 		// Ask yarn where its cache lives.
@@ -160,6 +156,24 @@ func (pm PackageManager) CacheDir(ctx context.Context, appDir string) (string, e
 	default:
 		return "", fmt.Errorf("unknown package manager: %s", pm)
 	}
+}
+
+// npmCacheDir asks npm where its cache is, falling back to where npm puts it
+// by default: %LOCALAPPDATA%\npm-cache on Windows, ~/.npm elsewhere.
+func npmCacheDir(ctx context.Context, appDir, home string) string {
+	out, err := inDir(exec.CommandContext(ctx, "npm", "config", "get", "cache"), appDir).Output()
+	if err == nil {
+		if dir := strings.TrimSpace(string(out)); dir != "" {
+			return dir
+		}
+	}
+	if v := os.Getenv("NPM_CONFIG_CACHE"); v != "" {
+		return v
+	}
+	if localAppData := os.Getenv("LOCALAPPDATA"); runtime.GOOS == "windows" && localAppData != "" {
+		return filepath.Join(localAppData, "npm-cache")
+	}
+	return filepath.Join(home, ".npm")
 }
 
 // inDir runs cmd from dir, so a package manager answers for the project rather
