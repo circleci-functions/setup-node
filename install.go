@@ -24,6 +24,7 @@ type installCmd struct {
 	Cache           bool   `help:"Restore the Node.js install from the job cache, and save it after a fresh download. Set to false to disable caching." default:"true"`
 	InstallDir      string `help:"Directory to install Node.js versions under." default:"~/.cache/setup-node" hidden:""`
 	BinDir          string `help:"Link node, npm and npx into this directory instead of discovering one on PATH." type:"path" hidden:""`
+	CacheNonce      string `help:"Partition the Node.js install cache, so a test run cannot restore an earlier run's install." hidden:""`
 }
 
 func (c *installCmd) Run(ctx context.Context, client *sdk.Client) error {
@@ -111,7 +112,7 @@ func (c *installCmd) ensureInstalled(ctx context.Context, client *sdk.Client, di
 		return nil
 	}
 
-	key := toolchainCacheKey(version)
+	key := toolchainCacheKey(version, c.CacheNonce)
 	if c.Cache {
 		_, err := client.RestoreCache(ctx, []string{key}, sdk.WithStepName("Restoring Node.js "+version))
 		sdk.LogCacheErr("restore", err)
@@ -131,8 +132,12 @@ func (c *installCmd) ensureInstalled(ctx context.Context, client *sdk.Client, di
 	return nil
 }
 
-func toolchainCacheKey(version string) string {
-	return fmt.Sprintf("setup-node-toolchain-v1-%s-%s", sdk.OSArch(), version)
+func toolchainCacheKey(version, nonce string) string {
+	key := fmt.Sprintf("setup-node-toolchain-v1-%s-%s", sdk.OSArch(), version)
+	if nonce != "" {
+		key += "-" + nonce
+	}
+	return key
 }
 
 // expandHome resolves a leading ~ against $HOME. kong's path type resolves it
