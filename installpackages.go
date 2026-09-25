@@ -58,7 +58,7 @@ func (c *installPackagesCmd) Run(ctx context.Context, client *sdk.Client) error 
 		fmt.Fprintf(os.Stderr, "setup-node: %s cache directory %s\n", pm, cacheDir)
 
 		if lockfile, err := os.ReadFile(filepath.Join(c.AppDir, pm.Lockfile())); err == nil { //nolint:gosec // lockfile name is one of a fixed set of known filenames
-			cacheKey = fmt.Sprintf("setup-node-packages-v1-%s-%s-%s-%x", runtime.GOOS, runtime.GOARCH, pm, sha256.Sum256(lockfile))
+			cacheKey = fmt.Sprintf("setup-node-packages-v2-%s-%s-%s-%x", runtime.GOOS, runtime.GOARCH, pm, sha256.Sum256(lockfile))
 			before := entryNames(cacheDir)
 			_, err := client.RestoreCache(ctx, []string{cacheKey}, sdk.WithStepName(fmt.Sprintf("Restoring %s cache", pm)))
 			sdk.LogCacheErr("restore", err)

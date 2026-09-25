@@ -121,8 +121,10 @@ func TestAcceptance_InstallsOntoTheRealPath(t *testing.T) {
 	t.Run("InstallsPackagesWithTheInstalledNpm", func(t *testing.T) {
 		skip.If(t, !sdk.InCircleCIJob(), "the cache round trip needs a CircleCI job's cache")
 		app := t.TempDir()
-		assert.NilError(t, os.WriteFile(filepath.Join(app, "package.json"),
-			[]byte(`{"dependencies": {"is-odd": "^3.0.1"}}`), 0600))
+		// Named for this run, so its lockfile, and so its write-once cache key,
+		// is one no earlier pipeline saved.
+		manifest := `{"name": "smoke-` + strings.ToLower(s.CacheKeyNonce) + `", "dependencies": {"is-odd": "^3.0.1"}}`
+		assert.NilError(t, os.WriteFile(filepath.Join(app, "package.json"), []byte(manifest), 0600))
 		npm(t, app, "install", "--package-lock-only")
 
 		out := run(t, app, "install-packages", "--package-manager", "npm")

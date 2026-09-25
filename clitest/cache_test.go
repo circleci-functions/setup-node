@@ -97,7 +97,7 @@ func TestCLI_Cache_SaveAndRestoreCalled(t *testing.T) {
 	assert.Equal(t, len(rec.restores), 1, "expected exactly one restore call")
 	assert.Equal(t, len(rec.restores[0].Keys), 1, "expected exactly one restore key")
 	key := rec.restores[0].Keys[0]
-	assert.Assert(t, strings.Contains(key, "setup-node-packages-v1-"), "unexpected cache key: %s", key)
+	assert.Assert(t, strings.Contains(key, "setup-node-packages-v2-"), "unexpected cache key: %s", key)
 	assert.Assert(t, strings.Contains(key, "npm"), "expected cache key to mention the package manager: %s", key)
 	assert.Equal(t, rec.restores[0].Name, "Restoring npm cache", "expected the restore step to be named")
 
