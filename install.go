@@ -66,7 +66,7 @@ func (c *installCmd) Run(ctx context.Context, client *sdk.Client) error {
 	if prefix, err := nodepath.SetGlobalPrefix(root, dir); err != nil {
 		fmt.Fprintf(os.Stderr, "setup-node: warning: %v; executables from npm install -g will not be on PATH\n", err)
 	} else {
-		fmt.Fprintf(os.Stderr, "setup-node: npm install -g will install into %s\n", prefix)
+		fmt.Fprintf(os.Stderr, "setup-node: set npm's default global prefix to %s (a prefix set in ~/.npmrc or $npm_config_prefix takes precedence)\n", prefix)
 	}
 	return nil
 }
