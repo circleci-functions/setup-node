@@ -59,8 +59,8 @@ func (d *Dist) Index(ctx context.Context) ([]nodeversion.Release, error) {
 
 // Install downloads the build of version for p, checks it against the
 // release's SHASUMS256.txt, and unpacks it so that dest is the root of the
-// Node.js install (holding bin/node, or node.exe on Windows). dest must not
-// exist yet.
+// Node.js install (holding bin/node, or node.exe on Windows). Anything already
+// at dest, such as an incomplete install, is replaced.
 func (d *Dist) Install(ctx context.Context, version string, p Platform, dest string) error {
 	version = "v" + strings.TrimPrefix(version, "v")
 	name := p.ArchiveName(version)
@@ -109,6 +109,9 @@ func (d *Dist) Install(ctx context.Context, version string, p Platform, dest str
 	root := filepath.Join(staging, p.DirName(version))
 	if _, err := os.Stat(root); err != nil {
 		return fmt.Errorf("%s has no %s directory", name, p.DirName(version))
+	}
+	if err := os.RemoveAll(dest); err != nil {
+		return err
 	}
 	return os.Rename(root, dest)
 }
