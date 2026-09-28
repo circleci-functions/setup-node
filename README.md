@@ -82,9 +82,11 @@ Node.js; install the others with npm:
 `--mirror` downloads from any server laid out like `https://nodejs.org/dist`:
 an `index.json`, and a `v<version>/` directory per release holding the
 archives and `SHASUMS256.txt`. `--mirror-token` is sent verbatim as the
-`Authorization` header. It is also read from `$NODE_MIRROR_TOKEN`, so the
-token can live in a context or project environment variable of that name
-rather than in your config:
+`Authorization` header. The mirror and token are also read from
+`$NODE_MIRROR` and `$NODE_MIRROR_TOKEN`, so both can live in a context or in
+project environment variables of those names rather than in your config. The
+token is never sent to nodejs.org: with no mirror set, setup-node warns and
+downloads without it.
 
 ```yaml
 - run: circleci run github.com/circleci-functions/setup-node@<version> -- --node-version 22 --mirror https://mirror.example.com/node
@@ -103,8 +105,8 @@ downloading it again. A cache problem never fails the job. Turn it off with
 |------|---------|-------------|
 | `--node-version` | (see above) | Version spec to install |
 | `--node-version-file` | (empty) | File to read the version spec from |
-| `--mirror` | `https://nodejs.org/dist` | Server to download Node.js from |
-| `--mirror-token` | (empty) | `Authorization` header value for `--mirror`; also read from `$NODE_MIRROR_TOKEN` |
+| `--mirror` | `https://nodejs.org/dist` | Server to download Node.js from; also read from `$NODE_MIRROR` |
+| `--mirror-token` | (empty) | `Authorization` header value for `--mirror`, never sent to nodejs.org; also read from `$NODE_MIRROR_TOKEN` |
 | `--cache` | true | Set `--cache=false` to disable caching the install |
 
 ## Installing dependencies

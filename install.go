@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,8 +20,8 @@ import (
 type installCmd struct {
 	NodeVersion     string `help:"Node.js version to install: an exact or partial version (22, 22.11.0), a semver range (>=20 <23), lts/*, lts/<codename>, lts/-n, or latest. Defaults to .nvmrc, then .node-version, then lts/*."`
 	NodeVersionFile string `help:"File to read the Node.js version from: .nvmrc, .node-version, .tool-versions, mise.toml or package.json." type:"path"`
-	Mirror          string `help:"Base URL of a server laid out like https://nodejs.org/dist to download Node.js from." default:"https://nodejs.org/dist"`
-	MirrorToken     string `help:"Authorization header value to send to --mirror. The token can also be set via the NODE_MIRROR_TOKEN env var." env:"NODE_MIRROR_TOKEN"`
+	Mirror          string `help:"Base URL of a server laid out like https://nodejs.org/dist to download Node.js from. The mirror can also be set via the NODE_MIRROR env var." default:"https://nodejs.org/dist" env:"NODE_MIRROR"`
+	MirrorToken     string `help:"Authorization header value to send to --mirror, never to nodejs.org. The token can also be set via the NODE_MIRROR_TOKEN env var." env:"NODE_MIRROR_TOKEN"`
 	Cache           bool   `help:"Restore the Node.js install from the job cache, and save it after a fresh download. Set to false to disable caching." default:"true"`
 	InstallDir      string `help:"Directory to install Node.js versions under." default:"~/.cache/setup-node" hidden:""`
 	BinDir          string `help:"Link node, npm and npx into this directory instead of discovering one on PATH." type:"path" hidden:""`
@@ -41,7 +42,12 @@ func (c *installCmd) Run(ctx context.Context, client *sdk.Client) error {
 	if err != nil {
 		return err
 	}
-	dist := nodedist.New(ctx, c.Mirror, c.MirrorToken)
+	token := c.MirrorToken
+	if token != "" && isOfficialServer(c.Mirror) {
+		fmt.Fprintf(os.Stderr, "setup-node: warning: not sending the mirror token to %s; set --mirror or NODE_MIRROR to the server it is for\n", c.Mirror)
+		token = ""
+	}
+	dist := nodedist.New(ctx, c.Mirror, token)
 
 	version, exact := nodeversion.Exact(spec)
 	if !exact {
@@ -151,6 +157,17 @@ func (c *installCmd) download(ctx context.Context, client *sdk.Client, dist *nod
 		sdk.LogCacheErr("save", client.SaveCache(ctx, toolchainCacheKey(version, c.CacheNonce), []string{root}, sdk.WithStepName("Saving Node.js "+version)))
 	}
 	return nil
+}
+
+// isOfficialServer reports whether mirror is on the official Node.js
+// distribution server's host, which a mirror token is never meant for.
+func isOfficialServer(mirror string) bool {
+	official, err := url.Parse(nodedist.DefaultURL)
+	if err != nil {
+		return false
+	}
+	u, err := url.Parse(mirror)
+	return err == nil && strings.EqualFold(u.Hostname(), official.Hostname())
 }
 
 func toolchainCacheKey(version, nonce string) string {
