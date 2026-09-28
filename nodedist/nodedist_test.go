@@ -88,6 +88,20 @@ func TestInstall(t *testing.T) {
 	}
 }
 
+func TestInstall_ReplacesIncompleteInstall(t *testing.T) {
+	srv := fakedist.New(t, fakedist.Release{Version: "22.1.0"})
+	dest := filepath.Join(t.TempDir(), "node")
+	assert.NilError(t, os.MkdirAll(filepath.Join(dest, "lib"), 0750))
+	assert.NilError(t, os.WriteFile(filepath.Join(dest, "lib", "leftover"), []byte("x"), 0600))
+
+	assert.NilError(t, New(context.Background(), srv.URL, "").Install(context.Background(), "22.1.0", Platform{OS: "linux", Arch: "x64"}, dest))
+
+	_, err := os.Stat(filepath.Join(dest, "bin", "node"))
+	assert.NilError(t, err)
+	_, err = os.Stat(filepath.Join(dest, "lib", "leftover"))
+	assert.Assert(t, os.IsNotExist(err), "the incomplete install was not replaced")
+}
+
 func TestInstall_UnixLayoutRuns(t *testing.T) {
 	skip.If(t, runtime.GOOS == "windows", "the fake build's node is a shell script")
 	srv := fakedist.New(t, fakedist.Release{Version: "22.1.0"})
