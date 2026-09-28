@@ -1,6 +1,7 @@
 package nodeversion
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,6 +46,7 @@ func FromFile(path string) (string, error) {
 		}
 	}
 
+	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 	if m := plainVersionRe.FindSubmatch(data); m != nil {
 		return string(m[1]), nil
 	}
