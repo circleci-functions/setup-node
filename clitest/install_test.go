@@ -205,6 +205,38 @@ func TestCLI_Install_RerunReusesInstall(t *testing.T) {
 	assert.Equal(t, len(rec.restores), 1, "a rerun should not touch the cache")
 }
 
+func TestCLI_Install_ExactVersionNeedsNoIndexWhenAvailable(t *testing.T) {
+	srv, binDir := installEnv(t)
+	s, run := sandbox(t)
+	args := []string{"--node-version", "22.2.0", "--mirror", srv.URL, "--bin-dir", binDir}
+
+	out, err := run(t, nil, args...)
+	assert.NilError(t, err, "output: %s", out)
+	assert.Assert(t, indexFetches(srv) == 1, "expected the first run to check the release against the index")
+	served := len(srv.Requests())
+
+	out, err = run(t, nil, args...)
+	assert.NilError(t, err, "output: %s", out)
+	assert.Equal(t, len(srv.Requests()), served, "expected a rerun to use the install without the server")
+
+	assert.NilError(t, os.RemoveAll(filepath.Join(s.Home, ".cache", "setup-node")))
+	out, err = run(t, nil, args...)
+	assert.NilError(t, err, "output: %s", out)
+	assert.Assert(t, strings.Contains(out, "restored Node.js v22.2.0 from cache"), "output: %s", out)
+	assert.Equal(t, len(srv.Requests()), served, "expected a cache restore without the server")
+	assert.Equal(t, nodeVersion(t, binDir), "v22.2.0")
+}
+
+func indexFetches(srv *fakedist.Server) int {
+	n := 0
+	for _, r := range srv.Requests() {
+		if r.URL.Path == "/index.json" {
+			n++
+		}
+	}
+	return n
+}
+
 func TestCLI_Install_MirrorTokenFromEnv(t *testing.T) {
 	srv, binDir := installEnv(t)
 	_, run := sandbox(t)
