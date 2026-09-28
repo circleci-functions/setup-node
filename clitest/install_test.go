@@ -237,6 +237,28 @@ func indexFetches(srv *fakedist.Server) int {
 	return n
 }
 
+func TestCLI_Install_MirrorFromEnv(t *testing.T) {
+	srv, binDir := installEnv(t)
+	_, run := sandbox(t)
+
+	out, err := run(t, map[string]string{"NODE_MIRROR": srv.URL, "HTTPS_PROXY": "http://127.0.0.1:99999"}, "--node-version", "22", "--bin-dir", binDir)
+	assert.NilError(t, err, "output: %s", out)
+	assert.Equal(t, srv.Downloads(), 1)
+}
+
+func TestCLI_Install_MirrorTokenNotSentToOfficialServer(t *testing.T) {
+	srv, binDir := installEnv(t)
+	_, run := sandbox(t)
+
+	out, err := run(t, nil, "--node-version", "22.2.0", "--mirror", srv.URL, "--bin-dir", binDir)
+	assert.NilError(t, err, "output: %s", out)
+
+	env := map[string]string{"NODE_MIRROR_TOKEN": "Bearer s3cret", "HTTPS_PROXY": "http://127.0.0.1:99999"}
+	out, err = run(t, env, "--node-version", "22.2.0", "--bin-dir", binDir)
+	assert.NilError(t, err, "output: %s", out)
+	assert.Assert(t, strings.Contains(out, "not sending the mirror token to https://nodejs.org/dist"), "output: %s", out)
+}
+
 func TestCLI_Install_MirrorTokenFromEnv(t *testing.T) {
 	srv, binDir := installEnv(t)
 	_, run := sandbox(t)
