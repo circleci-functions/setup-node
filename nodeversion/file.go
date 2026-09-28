@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -27,6 +28,21 @@ var plainVersionRe = regexp.MustCompile(`(?m)^(?:node(?:js)?\s+)?v?(\S+)$`)
 // volta.extends), mise.toml (tools.node), .tool-versions (a node or nodejs
 // line) and files holding just a version, such as .nvmrc and .node-version.
 func FromFile(path string) (string, error) {
+	return fromFile(path, nil)
+}
+
+// fromFile is FromFile for a file reached through the volta.extends chain of
+// the files in seen.
+func fromFile(path string, seen []string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if slices.Contains(seen, abs) {
+		return "", fmt.Errorf("volta.extends cycle: %s", strings.Join(append(seen, abs), " -> "))
+	}
+	seen = append(seen, abs)
+
 	data, err := os.ReadFile(path) //nolint:gosec // reading the caller's chosen version file is the point
 	if err != nil {
 		return "", err
@@ -34,7 +50,7 @@ func FromFile(path string) (string, error) {
 
 	var manifest map[string]any
 	if json.Unmarshal(data, &manifest) == nil && manifest != nil {
-		return fromPackageJSON(path, manifest)
+		return fromPackageJSON(path, manifest, seen)
 	}
 
 	var mise struct {
@@ -56,7 +72,7 @@ func FromFile(path string) (string, error) {
 	return "", fmt.Errorf("no Node.js version found in %s", path)
 }
 
-func fromPackageJSON(path string, manifest map[string]any) (string, error) {
+func fromPackageJSON(path string, manifest map[string]any, seen []string) (string, error) {
 	if v := str(dig(manifest, "volta", "node")); v != "" {
 		return v, nil
 	}
@@ -67,7 +83,7 @@ func fromPackageJSON(path string, manifest map[string]any) (string, error) {
 		return v, nil
 	}
 	if extends := str(dig(manifest, "volta", "extends")); extends != "" {
-		return FromFile(filepath.Join(filepath.Dir(path), extends))
+		return fromFile(filepath.Join(filepath.Dir(path), extends), seen)
 	}
 	return "", fmt.Errorf("no Node.js version found in %s", path)
 }
