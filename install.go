@@ -37,31 +37,35 @@ func (c *installCmd) Run(ctx context.Context, client *sdk.Client) error {
 	if err != nil {
 		return err
 	}
-	dist := nodedist.New(ctx, c.Mirror, c.MirrorToken)
-	releases, err := dist.Index(ctx)
-	if err != nil {
-		return err
-	}
-	release, err := nodeversion.Resolve(spec, releases, platform.FileID())
-	if err != nil {
-		return fmt.Errorf("resolve Node.js version: %w", err)
-	}
-	fmt.Fprintf(os.Stderr, "setup-node: resolved %q to Node.js %s (%s)\n", spec, release.Version, platform)
-
 	installDir, err := expandHome(c.InstallDir)
 	if err != nil {
 		return err
 	}
-	root := filepath.Join(installDir, release.Version+"-"+platform.String())
-	if err := c.ensureInstalled(ctx, client, dist, release.Version, platform, root); err != nil {
-		return err
+	dist := nodedist.New(ctx, c.Mirror, c.MirrorToken)
+
+	version, exact := nodeversion.Exact(spec)
+	if !exact {
+		if version, err = resolve(ctx, dist, spec, platform); err != nil {
+			return err
+		}
+	}
+	root := filepath.Join(installDir, version+"-"+platform.String())
+	if !c.restore(ctx, client, version, root) {
+		if exact {
+			if _, err := resolve(ctx, dist, spec, platform); err != nil {
+				return err
+			}
+		}
+		if err := c.download(ctx, client, dist, version, platform, root); err != nil {
+			return err
+		}
 	}
 
-	dir, err := nodepath.Link(nodepath.Options{Root: root, Version: release.Version, BinDir: c.BinDir})
+	dir, err := nodepath.Link(nodepath.Options{Root: root, Version: version, BinDir: c.BinDir})
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "setup-node: Node.js %s installed at %s, linked into %s\n", release.Version, root, dir)
+	fmt.Fprintf(os.Stderr, "setup-node: Node.js %s installed at %s, linked into %s\n", version, root, dir)
 
 	if prefix, err := nodepath.SetGlobalPrefix(root, dir); err != nil {
 		fmt.Fprintf(os.Stderr, "setup-node: warning: %v; executables from npm install -g will not be on PATH\n", err)
@@ -69,6 +73,21 @@ func (c *installCmd) Run(ctx context.Context, client *sdk.Client) error {
 		fmt.Fprintf(os.Stderr, "setup-node: set npm's default global prefix to %s (a prefix set in ~/.npmrc or $npm_config_prefix takes precedence)\n", prefix)
 	}
 	return nil
+}
+
+// resolve returns the version of the newest release in dist's index that
+// matches spec and ships a build for platform.
+func resolve(ctx context.Context, dist *nodedist.Dist, spec string, platform nodedist.Platform) (string, error) {
+	releases, err := dist.Index(ctx)
+	if err != nil {
+		return "", err
+	}
+	release, err := nodeversion.Resolve(spec, releases, platform.FileID())
+	if err != nil {
+		return "", fmt.Errorf("resolve Node.js version: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "setup-node: resolved %q to Node.js %s (%s)\n", spec, release.Version, platform)
+	return release.Version, nil
 }
 
 // versionSpec picks the version spec from --node-version, --node-version-file,
@@ -105,29 +124,31 @@ func (c *installCmd) versionSpec() (string, error) {
 	return spec, nil
 }
 
-// ensureInstalled makes sure root holds the install of version, from an
-// earlier run, the job cache, or a fresh download, in that order of preference.
-func (c *installCmd) ensureInstalled(ctx context.Context, client *sdk.Client, dist *nodedist.Dist, version string, platform nodedist.Platform, root string) error {
+// restore reports whether root holds the install of version, from an earlier
+// run or, failing that, the job cache.
+func (c *installCmd) restore(ctx context.Context, client *sdk.Client, version, root string) bool {
 	if installed(root) {
-		return nil
+		return true
 	}
-
-	key := toolchainCacheKey(version, c.CacheNonce)
-	if c.Cache {
-		_, err := client.RestoreCache(ctx, []string{key}, sdk.WithStepName("Restoring Node.js "+version))
-		sdk.LogCacheErr("restore", err)
-		if installed(root) {
-			fmt.Fprintf(os.Stderr, "setup-node: restored Node.js %s from cache\n", version)
-			return nil
-		}
+	if !c.Cache {
+		return false
 	}
+	_, err := client.RestoreCache(ctx, []string{toolchainCacheKey(version, c.CacheNonce)}, sdk.WithStepName("Restoring Node.js "+version))
+	sdk.LogCacheErr("restore", err)
+	if !installed(root) {
+		return false
+	}
+	fmt.Fprintf(os.Stderr, "setup-node: restored Node.js %s from cache\n", version)
+	return true
+}
 
+// download installs version at root from dist, and saves it to the job cache.
+func (c *installCmd) download(ctx context.Context, client *sdk.Client, dist *nodedist.Dist, version string, platform nodedist.Platform, root string) error {
 	if err := dist.Install(ctx, version, platform, root); err != nil {
 		return err
 	}
-
 	if c.Cache {
-		sdk.LogCacheErr("save", client.SaveCache(ctx, key, []string{root}, sdk.WithStepName("Saving Node.js "+version)))
+		sdk.LogCacheErr("save", client.SaveCache(ctx, toolchainCacheKey(version, c.CacheNonce), []string{root}, sdk.WithStepName("Saving Node.js "+version)))
 	}
 	return nil
 }

@@ -80,6 +80,18 @@ func Resolve(spec string, releases []Release, fileID string) (Release, error) {
 	return pick(sorted, spec, fileID, func(r parsed) bool { return c.Check(r.v) })
 }
 
+// Exact returns the release version, such as "v22.11.0", that spec names
+// outright, and whether it names one. Such a spec resolves to the same release
+// whatever the index lists, so it can be looked for locally without the index.
+func Exact(spec string) (string, bool) {
+	s := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(spec)), "v")
+	v, err := semver.StrictNewVersion(s)
+	if err != nil || v.Prerelease() != "" || v.Metadata() != "" {
+		return "", false
+	}
+	return "v" + v.String(), true
+}
+
 // pick returns the first of sorted that match accepts and that ships fileID,
 // distinguishing "nothing matches" from "matches, but not for this platform".
 func pick(sorted []parsed, spec, fileID string, match func(parsed) bool) (Release, error) {
