@@ -82,6 +82,33 @@ func TestResolve_Errors(t *testing.T) {
 	}
 }
 
+func TestExact(t *testing.T) {
+	tests := []struct {
+		spec   string
+		want   string
+		wantOK bool
+	}{
+		{spec: "22.11.0", want: "v22.11.0", wantOK: true},
+		{spec: "v22.11.0", want: "v22.11.0", wantOK: true},
+		{spec: " V22.11.0 ", want: "v22.11.0", wantOK: true},
+		{spec: "22"},
+		{spec: "22.11"},
+		{spec: "22.x"},
+		{spec: "^22.11.0"},
+		{spec: ">=22.11.0"},
+		{spec: "22.11.0-rc.1"},
+		{spec: "lts/*"},
+		{spec: "latest"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.spec, func(t *testing.T) {
+			got, ok := Exact(tc.spec)
+			assert.Equal(t, ok, tc.wantOK)
+			assert.Equal(t, got, tc.want)
+		})
+	}
+}
+
 func TestRelease_Number(t *testing.T) {
 	assert.Equal(t, Release{Version: "v22.1.0"}.Number(), "22.1.0")
 }

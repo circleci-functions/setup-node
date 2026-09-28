@@ -28,9 +28,12 @@ func TestFromFile(t *testing.T) {
 		{name: "nvmrc with v", files: map[string]string{".nvmrc": "v20\n"}, file: ".nvmrc", want: "20"},
 		{name: "nvmrc alias", files: map[string]string{".nvmrc": "lts/iron\n"}, file: ".nvmrc", want: "lts/iron"},
 		{name: "nvmrc with comment", files: map[string]string{".nvmrc": "# pinned for CI\n22\n"}, file: ".nvmrc", want: "22"},
+		{name: "nvmrc crlf", files: map[string]string{".nvmrc": "22.11.0\r\n"}, file: ".nvmrc", want: "22.11.0"},
+		{name: "nvmrc crlf with comment", files: map[string]string{".nvmrc": "# pinned for CI\r\n22\r\n"}, file: ".nvmrc", want: "22"},
 		{name: "node-version", files: map[string]string{".node-version": "24.1.0"}, file: ".node-version", want: "24.1.0"},
 		{name: "tool-versions", files: map[string]string{".tool-versions": "python 3.12.1\nnodejs 22.3.0\n"}, file: ".tool-versions", want: "22.3.0"},
 		{name: "tool-versions node", files: map[string]string{".tool-versions": "node 20.1.0\n"}, file: ".tool-versions", want: "20.1.0"},
+		{name: "tool-versions crlf", files: map[string]string{".tool-versions": "nodejs 20.1.0\r\npython 3.11\r\n"}, file: ".tool-versions", want: "20.1.0"},
 		{name: "mise string", files: map[string]string{"mise.toml": "[tools]\nnode = \"22\"\n"}, file: "mise.toml", want: "22"},
 		{name: "mise table", files: map[string]string{"mise.toml": "[tools]\nnode = { version = \"24.2.0\" }\n"}, file: "mise.toml", want: "24.2.0"},
 		{
@@ -61,6 +64,15 @@ func TestFromFile(t *testing.T) {
 			},
 			file: "package.json", want: "22.4.0",
 		},
+		{
+			name: "package.json volta extends chain",
+			files: map[string]string{
+				"package.json": `{"volta":{"extends":"middle.json"}}`,
+				"middle.json":  `{"volta":{"extends":"base.json"}}`,
+				"base.json":    `{"volta":{"node":"22.4.0"}}`,
+			},
+			file: "package.json", want: "22.4.0",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,6 +95,15 @@ func TestFromFile_Errors(t *testing.T) {
 		{name: "empty", files: map[string]string{".nvmrc": "\n\n"}, file: ".nvmrc", wantErr: "no Node.js version found"},
 		{name: "package.json without node", files: map[string]string{"package.json": `{"name":"app"}`}, file: "package.json", wantErr: "no Node.js version found"},
 		{name: "mise without version", files: map[string]string{"mise.toml": "[tools.node]\npostinstall = \"x\"\n"}, file: "mise.toml", wantErr: "no Node.js version found"},
+		{name: "volta extends itself", files: map[string]string{"package.json": `{"volta":{"extends":"package.json"}}`}, file: "package.json", wantErr: "volta.extends cycle"},
+		{
+			name: "volta extends cycle",
+			files: map[string]string{
+				"package.json": `{"volta":{"extends":"base.json"}}`,
+				"base.json":    `{"volta":{"extends":"package.json"}}`,
+			},
+			file: "package.json", wantErr: "volta.extends cycle",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
