@@ -5,10 +5,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
+	"gotest.tools/v3/skip"
 
 	"github.com/circleci-functions/setup-node/node"
 )
@@ -83,6 +85,19 @@ func TestCacheDirs_NPM(t *testing.T) {
 		dir, err := node.NPM.CacheDir(ctx, t.TempDir())
 		assert.NilError(t, err)
 		assert.Equal(t, dir, "/test/custom-npm-cache")
+	})
+
+	t.Run("asks npm", func(t *testing.T) {
+		skip.If(t, runtime.GOOS == "windows", "the npm stub is a shell script")
+		stub := t.TempDir()
+		//nolint:gosec // test stub with fixed content; 0700 so it is executable
+		assert.NilError(t, os.WriteFile(filepath.Join(stub, "npm"), []byte("#!/bin/sh\necho /from/npm\n"), 0700))
+		t.Setenv("PATH", stub+string(os.PathListSeparator)+os.Getenv("PATH"))
+		t.Setenv("NPM_CONFIG_CACHE", "/test/custom-npm-cache")
+
+		dir, err := node.NPM.CacheDir(ctx, t.TempDir())
+		assert.NilError(t, err)
+		assert.Equal(t, dir, "/from/npm")
 	})
 
 	t.Run("falls back to ~/.npm when env var unset", func(t *testing.T) {

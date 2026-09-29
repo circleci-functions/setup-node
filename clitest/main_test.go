@@ -1,9 +1,10 @@
 // Package clitest_test exercises the setup-node CLI contract end to end: flag
-// parsing, error paths, and how the command drives the cache SDK. It is
-// hermetic — no real package manager and no network — because every case here
-// either fails before an install runs or replaces the install with a trivial
-// --override-command. Real package-manager installs and real-infra cache
-// round-trips are covered by acceptance/.
+// parsing, error paths, and how the commands drive the cache SDK. It is
+// hermetic — no real package manager and no network — because Node.js installs
+// come from a fake distribution server, and every install-packages case either
+// fails before an install runs or replaces the install with a trivial
+// --override-command. Real downloads, real package-manager installs and
+// real-infra cache round-trips are covered by acceptance/.
 package clitest_test
 
 import (
