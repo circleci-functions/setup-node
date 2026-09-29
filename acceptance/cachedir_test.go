@@ -33,7 +33,7 @@ func TestAcceptance_CacheDirReuse(t *testing.T) {
 			s, run := sandbox(t)
 			appDir := copyFixture(t, pm)
 
-			out, err := run(t, nil, "--app-dir", appDir, "--package-manager", pm)
+			out, err := run(t, nil, "install-packages", "--app-dir", appDir, "--package-manager", pm)
 			assert.NilError(t, err, "output: %s", out)
 
 			saved := savedCacheDir(t, out)

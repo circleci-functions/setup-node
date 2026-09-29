@@ -17,13 +17,14 @@ import (
 //
 // The cache is in-memory here (see sandboxInMemory): the round-trip is exact
 // only against a cache with no prior history of setup-node's lockfile-derived,
-// write-once key. The live round-trip end to end is the CI smoke job's job.
+// write-once key. TestAcceptance_InstallsOntoTheRealPath covers the live
+// round-trip end to end.
 func TestAcceptance_Smoke(t *testing.T) {
 	requirePM(t, "npm")
 	s, run := sandboxInMemory(t)
 	appDir := copyFixture(t, "npm")
 
-	installArgs := []string{"--app-dir", appDir, "--package-manager", "npm"}
+	installArgs := []string{"install-packages", "--app-dir", appDir, "--package-manager", "npm"}
 
 	if !t.Run("Install", func(t *testing.T) {
 		out, err := run(t, nil, installArgs...)

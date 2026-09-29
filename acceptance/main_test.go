@@ -24,6 +24,12 @@ import (
 	"github.com/circleci-functions/toolkit/testing/runner"
 )
 
+// binaryPathEnvVar names a prebuilt setup-node to test, for an executor with no
+// Go toolchain to compile one with. The smoke jobs set it, and pair it with a
+// cross-compiled copy of this suite. A relative path is resolved here, since
+// the suite runs the binary from a working directory of its own.
+const binaryPathEnvVar = "SETUP_NODE_BINARY"
+
 var binaryPath string
 
 func TestMain(m *testing.M) {
@@ -36,6 +42,18 @@ func TestMain(m *testing.M) {
 }
 
 func runTests(m *testing.M) (int, error) {
+	if bin := os.Getenv(binaryPathEnvVar); bin != "" {
+		abs, err := filepath.Abs(bin)
+		if err != nil {
+			return 0, fmt.Errorf("%s=%q: %w", binaryPathEnvVar, bin, err)
+		}
+		if _, err := os.Stat(abs); err != nil {
+			return 0, fmt.Errorf("%s=%q: %w", binaryPathEnvVar, bin, err)
+		}
+		binaryPath = abs
+		return m.Run(), nil
+	}
+
 	p := compiler.NewParallel(1)
 	defer p.Cleanup()
 
@@ -76,8 +94,8 @@ func sandbox(t *testing.T) (*sdktest.Sandbox, runFunc) {
 // re-save is a no-op that leaves an earlier run's sandbox temp path stored — a
 // later restore then misses this run's temp dir. The fresh in-memory cache has
 // no such history, so the round-trip is exact. The live round-trip end to end
-// is covered by the CI smoke job, whose cache path is the executor's stable
-// ~/.npm rather than a per-run temp dir.
+// is covered by TestAcceptance_InstallsOntoTheRealPath, whose cache path is the
+// executor's stable ~/.npm rather than a per-run temp dir.
 func sandboxInMemory(t *testing.T) (*sdktest.Sandbox, runFunc) {
 	t.Helper()
 	s := sdktest.NewSandbox(t)
