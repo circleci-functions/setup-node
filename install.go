@@ -18,7 +18,7 @@ import (
 // installCmd installs an official Node.js build for the running platform and
 // makes node, npm and npx resolvable by name for the rest of the job.
 type installCmd struct {
-	NodeVersion     string `help:"Node.js version to install: an exact or partial version (22, 22.11.0), a semver range (>=20 <23), lts/*, lts/<codename>, lts/-n, or latest. Defaults to .nvmrc, then .node-version, then lts/*."`
+	NodeVersion     string `help:"Node.js version to install: an exact or partial version (22, 22.11.0), a semver range (>=20 <23), lts/*, lts/<codename>, lts/-n, or latest. Defaults to .nvmrc, then .node-version, then lts/*." example:"22"`
 	NodeVersionFile string `help:"File to read the Node.js version from: .nvmrc, .node-version, .tool-versions, mise.toml or package.json." type:"path"`
 	Mirror          string `help:"Base URL of a server laid out like https://nodejs.org/dist to download Node.js from. The mirror can also be set via the NODE_MIRROR env var." default:"https://nodejs.org/dist" env:"NODE_MIRROR"`
 	MirrorToken     string `help:"Authorization header value to send to --mirror, never to nodejs.org. The token can also be set via the NODE_MIRROR_TOKEN env var." env:"NODE_MIRROR_TOKEN"`
