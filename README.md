@@ -150,8 +150,11 @@ Replace it entirely with `--override-command`:
 
 Caching is on by default. `install-packages` restores the package manager's
 cache directory before installing and saves it back afterwards, keyed on the
-OS, architecture, package manager and a checksum of the lockfile, so a changed
-lockfile refreshes the cache on its own.
+OS, architecture, package manager and its version, the cache directory, and a
+checksum of the lockfile, so a changed lockfile refreshes the cache on its own.
+When nothing is saved for the current lockfile yet, the most recent cache with
+everything else the same is restored instead, so only the packages that changed
+are downloaded.
 
 Nothing is exported to `$BASH_ENV`: each package manager resolves the same
 cache directory on its own, so later steps read and write it whatever shell
@@ -159,8 +162,9 @@ they run in.
 
 Turn caching off with `--cache=false`. Cache problems never fail the job, and
 if the lockfile can't be read (e.g. a `bun.lockb`-only repo, or
-`--override-command` with nothing checked out) caching is skipped with a warning
-while the install still runs.
+`--override-command` with nothing checked out), or the package manager can't
+report its version, caching is skipped with a warning while the install still
+runs.
 
 ### Flags
 

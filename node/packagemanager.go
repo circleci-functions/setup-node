@@ -158,6 +158,21 @@ func (pm PackageManager) CacheDir(ctx context.Context, appDir string) (string, e
 	}
 }
 
+// Version returns the version of pm that runs in appDir, where a project's
+// packageManager field can pin a different one through corepack. A cache
+// written by one version may be laid out differently from what another reads.
+func (pm PackageManager) Version(ctx context.Context, appDir string) (string, error) {
+	out, err := inDir(exec.CommandContext(ctx, pm.Binary(), "--version"), appDir).Output() //nolint:gosec // pm is one of a fixed set of package managers
+	if err != nil {
+		return "", fmt.Errorf("%s --version: %w", pm, err)
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return "", fmt.Errorf("%s --version printed nothing", pm)
+	}
+	return fields[len(fields)-1], nil
+}
+
 // npmCacheDir asks npm where its cache is, falling back to where npm puts it
 // by default: %LOCALAPPDATA%\npm-cache on Windows, ~/.npm elsewhere.
 func npmCacheDir(ctx context.Context, appDir, home string) string {

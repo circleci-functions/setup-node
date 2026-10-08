@@ -95,9 +95,20 @@ func fixtureDir(t *testing.T, pm string) string {
 // is kept on the end so `go` and coreutils resolve.
 func stubPMPath(t *testing.T) string {
 	t.Helper()
+	return stubPMPathVersion(t, "10.9.0")
+}
+
+// stubPMPathVersion is stubPMPath with an npm that reports version from
+// --version, or prints nothing for an empty version.
+func stubPMPathVersion(t *testing.T, version string) string {
+	t.Helper()
 	dir := t.TempDir()
+	script := "#!/bin/sh\nexit 0\n"
+	if version != "" {
+		script = "#!/bin/sh\nif [ \"$1\" = --version ]; then echo " + version + "; fi\nexit 0\n"
+	}
 	//nolint:gosec // test stub with fixed content; 0700 so it is executable
-	assert.NilError(t, os.WriteFile(filepath.Join(dir, "npm"), []byte("#!/bin/sh\nexit 0\n"), 0700))
+	assert.NilError(t, os.WriteFile(filepath.Join(dir, "npm"), []byte(script), 0700))
 	return dir + string(os.PathListSeparator) + os.Getenv("PATH")
 }
 
