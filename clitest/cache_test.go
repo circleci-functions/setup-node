@@ -2,10 +2,13 @@ package clitest_test
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -77,7 +80,8 @@ func newCacheRecorder(t *testing.T) (*cacheRecorder, string) {
 
 // TestCLI_Cache_SaveAndRestoreCalled verifies that an install restores the
 // package manager cache before installing and saves it back under the same key
-// afterwards, keyed on the package manager and pointed at its cache directory.
+// afterwards, keyed on the package manager and its version and pointed at its
+// cache directory. The restore falls back to the key minus its lockfile hash.
 func TestCLI_Cache_SaveAndRestoreCalled(t *testing.T) {
 	_, run := sandbox(t)
 	rec, pluginURL := newCacheRecorder(t)
@@ -95,10 +99,12 @@ func TestCLI_Cache_SaveAndRestoreCalled(t *testing.T) {
 	assert.NilError(t, err, "output: %s", out)
 
 	assert.Equal(t, len(rec.restores), 1, "expected exactly one restore call")
-	assert.Equal(t, len(rec.restores[0].Keys), 1, "expected exactly one restore key")
-	key := rec.restores[0].Keys[0]
-	assert.Assert(t, strings.Contains(key, "setup-node-packages-v2-"), "unexpected cache key: %s", key)
-	assert.Assert(t, strings.Contains(key, "npm"), "expected cache key to mention the package manager: %s", key)
+	assert.Equal(t, len(rec.restores[0].Keys), 2, "expected an exact restore key and a fallback")
+	key, fallback := rec.restores[0].Keys[0], rec.restores[0].Keys[1]
+	wantFallback := regexp.MustCompile(`^setup-node-packages-v3-` + runtime.GOOS + `-` + runtime.GOARCH + `-npm-10\.9\.0-[0-9a-f]{8}-$`)
+	assert.Assert(t, wantFallback.MatchString(fallback), "unexpected fallback key: %s", fallback)
+	assert.Assert(t, regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(strings.TrimPrefix(key, fallback)),
+		"expected the exact key to be the fallback plus the lockfile hash: %s", key)
 	assert.Equal(t, rec.restores[0].Name, "Restoring npm cache", "expected the restore step to be named")
 
 	assert.Equal(t, len(rec.saves), 1, "expected exactly one save call")
@@ -128,12 +134,14 @@ func TestCLI_Cache_NoCallsWithCacheDisabled(t *testing.T) {
 }
 
 // TestCLI_Cache_KeyChangesWithLockfileContent verifies that the cache key is
-// derived from the lockfile contents, so a changed lockfile busts the cache.
+// derived from the lockfile contents, so a changed lockfile busts the cache,
+// while the fallback key stays the same so the restore still warm-starts.
 func TestCLI_Cache_KeyChangesWithLockfileContent(t *testing.T) {
 	_, run := sandbox(t)
 	rec, pluginURL := newCacheRecorder(t)
+	cacheDir := t.TempDir()
 
-	runOnce := func(lockfileSuffix string) string {
+	runOnce := func(lockfileSuffix string) []string {
 		appDir := copyFixture(t, "npm")
 		lockfile := filepath.Join(appDir, "package-lock.json")
 		data, readErr := os.ReadFile(lockfile) //nolint:gosec // fixture path is controlled by the test suite
@@ -141,15 +149,77 @@ func TestCLI_Cache_KeyChangesWithLockfileContent(t *testing.T) {
 		//nolint:gosec // fixture path is controlled by the test suite; fixtures are not secrets
 		assert.NilError(t, os.WriteFile(lockfile, append(data, []byte(lockfileSuffix)...), 0600))
 
-		env := map[string]string{"CIRCLECI_PLUGIN_URL": pluginURL, "NPM_CONFIG_CACHE": t.TempDir(), "PATH": stubPMPath(t)}
+		env := map[string]string{"CIRCLECI_PLUGIN_URL": pluginURL, "NPM_CONFIG_CACHE": cacheDir, "PATH": stubPMPath(t)}
 		out, runErr := run(t, env, "install-packages", "--app-dir", appDir, "--package-manager", "npm")
 		assert.NilError(t, runErr, "output: %s", out)
-		return rec.restores[len(rec.restores)-1].Keys[0]
+		return rec.restores[len(rec.restores)-1].Keys
 	}
 
-	key1 := runOnce("")
-	key2 := runOnce("\n")
-	assert.Assert(t, key1 != key2, "expected cache key to change when the lockfile content changes")
+	keys1 := runOnce("")
+	keys2 := runOnce("\n")
+	assert.Assert(t, keys1[0] != keys2[0], "expected cache key to change when the lockfile content changes")
+	assert.Equal(t, keys1[1], keys2[1], "expected the fallback key to survive a lockfile change")
+}
+
+// TestCLI_Cache_KeysChangeWithCacheInputs verifies that everything that makes a
+// saved cache unusable to a job lands in the fallback key as well as the exact
+// one, so a fallback restore never brings back a cache the job can't read: a
+// different package manager version may lay its cache out differently, and a
+// cache restored into a directory the package manager doesn't read is unused.
+func TestCLI_Cache_KeysChangeWithCacheInputs(t *testing.T) {
+	_, run := sandbox(t)
+	cacheDir := t.TempDir()
+
+	keys := func(t *testing.T, env map[string]string) []string {
+		t.Helper()
+		rec, pluginURL := newCacheRecorder(t)
+		appDir := copyFixture(t, "npm")
+		merged := map[string]string{
+			"CIRCLECI_PLUGIN_URL": pluginURL,
+			"NPM_CONFIG_CACHE":    cacheDir,
+			"PATH":                stubPMPath(t),
+		}
+		maps.Copy(merged, env)
+		out, err := run(t, merged, "install-packages", "--app-dir", appDir, "--package-manager", "npm")
+		assert.NilError(t, err, "output: %s", out)
+		assert.Equal(t, len(rec.restores), 1, "output: %s", out)
+		return rec.restores[0].Keys
+	}
+
+	base := keys(t, nil)
+	tests := []struct {
+		name string
+		env  map[string]string
+	}{
+		{name: "package manager version", env: map[string]string{"PATH": stubPMPathVersion(t, "11.0.0")}},
+		{name: "cache directory", env: map[string]string{"NPM_CONFIG_CACHE": t.TempDir()}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := keys(t, tc.env)
+			assert.Assert(t, got[0] != base[0], "expected the cache key to change: %s", got[0])
+			assert.Assert(t, got[1] != base[1], "expected the fallback key to change: %s", got[1])
+		})
+	}
+}
+
+// TestCLI_Cache_SkippedWhenVersionUnknown verifies that a package manager that
+// can't report its version skips the cache rather than saving one under a key
+// that would collide across versions, and still installs.
+func TestCLI_Cache_SkippedWhenVersionUnknown(t *testing.T) {
+	_, run := sandbox(t)
+	rec, pluginURL := newCacheRecorder(t)
+
+	appDir := copyFixture(t, "npm")
+	env := map[string]string{"CIRCLECI_PLUGIN_URL": pluginURL, "NPM_CONFIG_CACHE": t.TempDir(), "PATH": stubPMPathVersion(t, "")}
+
+	out, err := run(t, env, "install-packages", "--app-dir", appDir, "--package-manager", "npm")
+	assert.NilError(t, err, "output: %s", out)
+	assert.Assert(t, strings.Contains(out, "skipping cache restore"),
+		"expected output to mention skipping cache restore; got: %s", out)
+
+	assert.Equal(t, len(rec.restores), 0, "expected no restore calls")
+	assert.Equal(t, len(rec.saves), 0, "expected no save calls")
 }
 
 // TestCLI_Cache_SkippedWhenLockfileMissing verifies that a missing lockfile

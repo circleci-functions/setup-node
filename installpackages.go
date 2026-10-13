@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/circleci-functions/toolkit/sdk"
 
@@ -45,7 +44,8 @@ func (c *installPackagesCmd) Run(ctx context.Context, client *sdk.Client) error 
 
 	// cacheKey stays empty (skipping restore/save below) when the lockfile
 	// can't be read, e.g. a bun.lockb-only repo or an --override-command run
-	// with no lockfile at all.
+	// with no lockfile at all, or when the package manager can't report its
+	// version.
 	var cacheKey, cacheDir string
 	if c.Cache {
 		cacheDir, err = pm.CacheDir(ctx, appDir)
@@ -57,18 +57,22 @@ func (c *installPackagesCmd) Run(ctx context.Context, client *sdk.Client) error 
 		// that never gets used.
 		fmt.Fprintf(os.Stderr, "setup-node: %s cache directory %s\n", pm, cacheDir)
 
-		if lockfile, err := os.ReadFile(filepath.Join(c.AppDir, pm.Lockfile())); err == nil { //nolint:gosec // lockfile name is one of a fixed set of known filenames
-			cacheKey = fmt.Sprintf("setup-node-packages-v2-%s-%s-%s-%x", runtime.GOOS, runtime.GOARCH, pm, sha256.Sum256(lockfile))
+		lockfile, err := os.ReadFile(filepath.Join(c.AppDir, pm.Lockfile())) //nolint:gosec // lockfile name is one of a fixed set of known filenames
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "setup-node: no %s found, skipping cache restore\n", pm.Lockfile())
+		} else if pmVersion, err := pm.Version(ctx, appDir); err != nil {
+			fmt.Fprintf(os.Stderr, "setup-node: warning: %v; skipping cache restore\n", err)
+		} else {
+			var fallbackKey string
+			cacheKey, fallbackKey = packagesCacheKeys(pm, pmVersion, cacheDir, lockfile)
 			before := entryNames(cacheDir)
-			_, err := client.RestoreCache(ctx, []string{cacheKey}, sdk.WithStepName(fmt.Sprintf("Restoring %s cache", pm)))
+			_, err := client.RestoreCache(ctx, []string{cacheKey, fallbackKey}, sdk.WithStepName(fmt.Sprintf("Restoring %s cache", pm)))
 			sdk.LogCacheErr("restore", err)
 			// RestoreCache reports "success" even on a miss, so the only way to
 			// tell a hit apart is to check whether it actually added to cacheDir.
 			if err == nil && addedEntries(cacheDir, before) {
 				fmt.Fprintf(os.Stderr, "setup-node: restored %s from cache\n", cacheDir)
 			}
-		} else {
-			fmt.Fprintf(os.Stderr, "setup-node: no %s found, skipping cache restore\n", pm.Lockfile())
 		}
 	}
 
@@ -81,6 +85,19 @@ func (c *installPackagesCmd) Run(ctx context.Context, client *sdk.Client) error 
 	}
 
 	return nil
+}
+
+// packagesCacheKeys returns the key to save pm's cache under, and a prefix of
+// it to fall back to when nothing is saved under that key yet. The prefix
+// matches the newest cache saved for any lockfile, so a changed lockfile
+// downloads only what changed. Everything that can make a cache unreadable to
+// this job goes before the lockfile hash, so the fallback never crosses it: the
+// package manager and its version, which set the cache's layout, and the cache
+// directory, since a cache restored anywhere else is never read.
+func packagesCacheKeys(pm node.PackageManager, pmVersion, cacheDir string, lockfile []byte) (key, fallback string) {
+	dirHash := sha256.Sum256([]byte(cacheDir))
+	fallback = fmt.Sprintf("setup-node-packages-v3-%s-%s-%s-%x-", sdk.OSArch(), pm, pmVersion, dirHash[:4])
+	return fmt.Sprintf("%s%x", fallback, sha256.Sum256(lockfile)), fallback
 }
 
 // resolvePackageManager returns the package manager from the flag or by
