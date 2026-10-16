@@ -1,6 +1,8 @@
 package clitest_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -55,4 +57,26 @@ func TestCLI_InstallPackages_PackageManagerNotOnPATH(t *testing.T) {
 			})
 		}
 	}
+}
+
+// TestCLI_InstallPackages_DefaultNpmCommand verifies that npm's default install
+// is a clean install that skips npm's audit and funding checks, which a CI
+// install has no use for.
+func TestCLI_InstallPackages_DefaultNpmCommand(t *testing.T) {
+	_, run := sandbox(t)
+	appDir := copyFixture(t, "npm")
+
+	argsFile := filepath.Join(t.TempDir(), "args")
+	stub := t.TempDir()
+	script := "#!/bin/sh\necho \"$@\" > '" + argsFile + "'\n"
+	//nolint:gosec // test stub with fixed content; 0700 so it is executable
+	assert.NilError(t, os.WriteFile(filepath.Join(stub, "npm"), []byte(script), 0700))
+
+	out, err := run(t, map[string]string{"PATH": stub + string(os.PathListSeparator) + os.Getenv("PATH")},
+		"install-packages", "--app-dir", appDir, "--cache=false")
+	assert.NilError(t, err, "output: %s", out)
+
+	got, err := os.ReadFile(argsFile) //nolint:gosec // a path this test chose
+	assert.NilError(t, err, "npm was not run; output: %s", out)
+	assert.Equal(t, strings.TrimSpace(string(got)), "ci --no-audit --no-fund")
 }

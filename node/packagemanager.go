@@ -67,7 +67,7 @@ func (pm PackageManager) Lockfile() string {
 func (pm PackageManager) installCommand() []string {
 	switch pm {
 	case NPM:
-		return []string{"npm", "ci"}
+		return []string{"npm", "ci", "--no-audit", "--no-fund"}
 	case Yarn:
 		return []string{"yarn", "install", "--frozen-lockfile"}
 	case PNPM:

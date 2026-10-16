@@ -147,8 +147,10 @@ When more than one is present they are matched in that order. Set
 ```
 
 Each package manager runs a frozen install that fails if the lockfile is out of
-sync: `npm ci`, or `<pm> install --frozen-lockfile` for yarn, pnpm and bun.
-Replace it entirely with `--override-command`:
+sync: `npm ci --no-audit --no-fund`, or `<pm> install --frozen-lockfile` for
+yarn, pnpm and bun. npm's audit and funding checks are off because they slow
+the install and don't fail it; run `npm audit` as its own step to act on
+vulnerabilities. Replace the command entirely with `--override-command`:
 
 ```yaml
 - run: circleci run github.com/circleci-functions/setup-node@<version> -- install-packages --override-command "npm install --legacy-peer-deps"
