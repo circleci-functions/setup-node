@@ -41,50 +41,64 @@ func (c *installPackagesCmd) Run(ctx context.Context, client *sdk.Client) error 
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "setup-node: using package manager %s\n", pm)
+	if err := pm.RequireBinary(); err != nil {
+		return err
+	}
 
-	// cacheKey stays empty (skipping restore/save below) when the lockfile
-	// can't be read, e.g. a bun.lockb-only repo or an --override-command run
-	// with no lockfile at all, or when the package manager can't report its
-	// version.
 	var cacheKey, cacheDir string
 	if c.Cache {
-		cacheDir, err = pm.CacheDir(ctx, appDir)
-		if err != nil {
-			return fmt.Errorf("resolve cache dirs: %w", err)
-		}
-		// Worth reading even on a pass: a later step reaches this by asking the
-		// package manager the same question, so a wrong answer here is a cache
-		// that never gets used.
-		fmt.Fprintf(os.Stderr, "setup-node: %s cache directory %s\n", pm, cacheDir)
-
-		lockfile, err := os.ReadFile(filepath.Join(c.AppDir, pm.Lockfile())) //nolint:gosec // lockfile name is one of a fixed set of known filenames
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "setup-node: no %s found, skipping cache restore\n", pm.Lockfile())
-		} else if pmVersion, err := pm.Version(ctx, appDir); err != nil {
-			fmt.Fprintf(os.Stderr, "setup-node: warning: %v; skipping cache restore\n", err)
-		} else {
-			var fallbackKey string
-			cacheKey, fallbackKey = packagesCacheKeys(pm, pmVersion, cacheDir, lockfile)
-			before := entryNames(cacheDir)
-			_, err := client.RestoreCache(ctx, []string{cacheKey, fallbackKey}, sdk.WithStepName(fmt.Sprintf("Restoring %s cache", pm)))
-			sdk.LogCacheErr("restore", err)
-			// RestoreCache reports "success" even on a miss, so the only way to
-			// tell a hit apart is to check whether it actually added to cacheDir.
-			if err == nil && addedEntries(cacheDir, before) {
-				fmt.Fprintf(os.Stderr, "setup-node: restored %s from cache\n", cacheDir)
-			}
-		}
+		cacheKey, cacheDir = c.restoreCache(ctx, client, pm)
 	}
 
 	if err := pm.InstallPackages(ctx, c.AppDir, c.OverrideCommand); err != nil {
 		return err
 	}
 
-	if c.Cache && cacheKey != "" {
+	if cacheKey != "" {
 		sdk.LogCacheErr("save", client.SaveCache(ctx, cacheKey, []string{cacheDir}, sdk.WithStepName(fmt.Sprintf("Saving %s cache", pm))))
 	}
 
 	return nil
+}
+
+// restoreCache restores pm's download cache, and returns the key to save it
+// back under and the directory to save. The key is empty, so nothing is
+// restored or saved, when pm can't report its cache directory or its version,
+// or the lockfile can't be read (e.g. a bun.lockb-only repo, or an
+// --override-command run with no lockfile at all). Each of those is a warning
+// rather than an error, so the install still runs.
+func (c *installPackagesCmd) restoreCache(ctx context.Context, client *sdk.Client, pm node.PackageManager) (key, dir string) {
+	dir, err := pm.CacheDir(ctx, c.AppDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "setup-node: warning: %v; skipping cache restore\n", err)
+		return "", ""
+	}
+	// Worth reading even on a pass: a later step reaches this by asking the
+	// package manager the same question, so a wrong answer here is a cache
+	// that never gets used.
+	fmt.Fprintf(os.Stderr, "setup-node: %s cache directory %s\n", pm, dir)
+
+	lockfile, err := os.ReadFile(filepath.Join(c.AppDir, pm.Lockfile())) //nolint:gosec // lockfile name is one of a fixed set of known filenames
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "setup-node: no %s found, skipping cache restore\n", pm.Lockfile())
+		return "", dir
+	}
+	pmVersion, err := pm.Version(ctx, c.AppDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "setup-node: warning: %v; skipping cache restore\n", err)
+		return "", dir
+	}
+
+	key, fallbackKey := packagesCacheKeys(pm, pmVersion, dir, lockfile)
+	before := entryNames(dir)
+	_, err = client.RestoreCache(ctx, []string{key, fallbackKey}, sdk.WithStepName(fmt.Sprintf("Restoring %s cache", pm)))
+	sdk.LogCacheErr("restore", err)
+	// RestoreCache reports "success" even on a miss, so the only way to
+	// tell a hit apart is to check whether it actually added to dir.
+	if err == nil && addedEntries(dir, before) {
+		fmt.Fprintf(os.Stderr, "setup-node: restored %s from cache\n", dir)
+	}
+	return key, dir
 }
 
 // packagesCacheKeys returns the key to save pm's cache under, and a prefix of

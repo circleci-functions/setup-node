@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -132,7 +133,7 @@ func (pm PackageManager) CacheDir(ctx context.Context, appDir string) (string, e
 		return strings.TrimSpace(string(out)), nil
 
 	case PNPM:
-		out, err := inDir(exec.CommandContext(ctx, "pnpm", "store", "path"), appDir).Output()
+		out, err := output(inDir(exec.CommandContext(ctx, "pnpm", "store", "path"), appDir))
 		if err != nil {
 			return "", fmt.Errorf("pnpm store path: %w", err)
 		}
@@ -162,7 +163,7 @@ func (pm PackageManager) CacheDir(ctx context.Context, appDir string) (string, e
 // packageManager field can pin a different one through corepack. A cache
 // written by one version may be laid out differently from what another reads.
 func (pm PackageManager) Version(ctx context.Context, appDir string) (string, error) {
-	out, err := inDir(exec.CommandContext(ctx, pm.Binary(), "--version"), appDir).Output() //nolint:gosec // pm is one of a fixed set of package managers
+	out, err := output(inDir(exec.CommandContext(ctx, pm.Binary(), "--version"), appDir)) //nolint:gosec // pm is one of a fixed set of package managers
 	if err != nil {
 		return "", fmt.Errorf("%s --version: %w", pm, err)
 	}
@@ -191,6 +192,19 @@ func npmCacheDir(ctx context.Context, appDir, home string) string {
 	return filepath.Join(home, ".npm")
 }
 
+// output runs cmd and returns its stdout. A failure carries what cmd wrote to
+// stderr, since that is where a package manager says why it failed.
+func output(cmd *exec.Cmd) ([]byte, error) {
+	out, err := cmd.Output()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if stderr := strings.TrimSpace(string(exitErr.Stderr)); stderr != "" {
+			return out, fmt.Errorf("%w: %s", err, stderr)
+		}
+	}
+	return out, err
+}
+
 // inDir runs cmd from dir, so a package manager answers for the project rather
 // than for wherever the function happens to be running.
 func inDir(cmd *exec.Cmd, dir string) *exec.Cmd {
@@ -198,16 +212,21 @@ func inDir(cmd *exec.Cmd, dir string) *exec.Cmd {
 	return cmd
 }
 
+// RequireBinary returns an error if pm's executable is not on PATH. Checking before
+// anything runs pm means a missing package manager fails with this error
+// rather than with whatever the first command to run it reports.
+func (pm PackageManager) RequireBinary() error {
+	if _, err := exec.LookPath(pm.Binary()); err != nil {
+		return fmt.Errorf("%s binary not found on PATH", pm)
+	}
+	return nil
+}
+
 // InstallPackages executes the command to install packages in appDir.
 // If overrideCommand is non-empty it is shell-split and used instead of
 // pm.InstallCommand(), stdout and stderr are forwarded to the process's own
 // stdout/stderr so output is visible to the caller.
 func (pm PackageManager) InstallPackages(ctx context.Context, appDir, overrideCommand string) error {
-	// Check that the PackageManager's binary exists in PATH
-	if _, err := exec.LookPath(pm.Binary()); err != nil {
-		return fmt.Errorf("%s binary not found on PATH", pm)
-	}
-
 	args, err := pm.buildArgs(overrideCommand)
 	if err != nil {
 		return err

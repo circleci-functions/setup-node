@@ -160,11 +160,12 @@ Nothing is exported to `$BASH_ENV`: each package manager resolves the same
 cache directory on its own, so later steps read and write it whatever shell
 they run in.
 
-Turn caching off with `--cache=false`. Cache problems never fail the job, and
-if the lockfile can't be read (e.g. a `bun.lockb`-only repo, or
-`--override-command` with nothing checked out), or the package manager can't
-report its version, caching is skipped with a warning while the install still
-runs.
+Turn caching off with `--cache=false`. Cache problems never fail the job: if
+the package manager can't report its cache directory or its version, or the
+lockfile can't be read (e.g. a `bun.lockb`-only repo, or `--override-command`
+with nothing checked out), caching is skipped with a warning while the install
+still runs. A package manager missing from `PATH` fails the step, cache or no
+cache.
 
 ### Flags
 

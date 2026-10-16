@@ -102,13 +102,22 @@ func stubPMPath(t *testing.T) string {
 // --version, or prints nothing for an empty version.
 func stubPMPathVersion(t *testing.T, version string) string {
 	t.Helper()
-	dir := t.TempDir()
 	script := "#!/bin/sh\nexit 0\n"
 	if version != "" {
 		script = "#!/bin/sh\nif [ \"$1\" = --version ]; then echo " + version + "; fi\nexit 0\n"
 	}
-	//nolint:gosec // test stub with fixed content; 0700 so it is executable
-	assert.NilError(t, os.WriteFile(filepath.Join(dir, "npm"), []byte(script), 0700))
+	return stubPATH(t, map[string]string{"npm": script})
+}
+
+// stubPATH returns a PATH value with an executable for each of stubs, named by
+// its key and holding its value, prepended to the inherited PATH.
+func stubPATH(t *testing.T, stubs map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, script := range stubs {
+		//nolint:gosec // test stub with fixed content; 0700 so it is executable
+		assert.NilError(t, os.WriteFile(filepath.Join(dir, name), []byte(script), 0700))
+	}
 	return dir + string(os.PathListSeparator) + os.Getenv("PATH")
 }
 
