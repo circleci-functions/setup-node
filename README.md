@@ -68,8 +68,16 @@ executables will not be on `PATH`.
 
 ### Package managers
 
-`install-packages` needs the package manager already on `PATH`. npm comes with
-Node.js; install the others with npm:
+`install-packages` runs the package manager on `PATH`, whatever its version.
+npm comes with Node.js. If pnpm, yarn or bun is missing and `package.json` pins
+it with `packageManager` (e.g. `"packageManager": "pnpm@10.12.1"`),
+`install-packages` installs that version with `npm install --global` first.
+Yarn 2 and later come from npm's `@yarnpkg/cli-dist` package, since the `yarn`
+package stops at Yarn 1. corepack is not used: Node.js 25 and later don't ship
+it.
+
+With no pin, a missing package manager fails the step, so install it in an
+earlier step:
 
 ```yaml
 - run: circleci run github.com/circleci-functions/setup-node@<version> -- --node-version 24
@@ -164,8 +172,8 @@ Turn caching off with `--cache=false`. Cache problems never fail the job: if
 the package manager can't report its cache directory or its version, or the
 lockfile can't be read (e.g. a `bun.lockb`-only repo, or `--override-command`
 with nothing checked out), caching is skipped with a warning while the install
-still runs. A package manager missing from `PATH` fails the step, cache or no
-cache.
+still runs. A package manager that is missing from `PATH` and not pinned in
+`package.json` fails the step, cache or no cache.
 
 ### Flags
 

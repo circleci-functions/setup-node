@@ -212,16 +212,6 @@ func inDir(cmd *exec.Cmd, dir string) *exec.Cmd {
 	return cmd
 }
 
-// RequireBinary returns an error if pm's executable is not on PATH. Checking before
-// anything runs pm means a missing package manager fails with this error
-// rather than with whatever the first command to run it reports.
-func (pm PackageManager) RequireBinary() error {
-	if _, err := exec.LookPath(pm.Binary()); err != nil {
-		return fmt.Errorf("%s binary not found on PATH", pm)
-	}
-	return nil
-}
-
 // InstallPackages executes the command to install packages in appDir.
 // If overrideCommand is non-empty it is shell-split and used instead of
 // pm.InstallCommand(), stdout and stderr are forwarded to the process's own
