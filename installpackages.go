@@ -41,7 +41,7 @@ func (c *installPackagesCmd) Run(ctx context.Context, client *sdk.Client) error 
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "setup-node: using package manager %s\n", pm)
-	if err := pm.RequireBinary(); err != nil {
+	if err := pm.EnsureBinary(ctx, c.AppDir); err != nil {
 		return err
 	}
 
