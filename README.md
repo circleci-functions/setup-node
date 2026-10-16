@@ -5,15 +5,36 @@ job. An optional `install-packages` command then installs your dependencies
 with the right package manager, caching what it downloads.
 
 ```yaml
-steps:
-  - checkout
-  - run:
-      name: Install Node.js
-      command: circleci run github.com/circleci-functions/setup-node@<version> -- --node-version 22
-  - run:
-      name: Install dependencies
-      command: circleci run github.com/circleci-functions/setup-node@<version> -- install-packages --app-dir ./frontend
-  - run: npm test
+functions:
+  node: github.com/circleci-functions/setup-node@<version>
+
+jobs:
+  test:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - node:
+          with:
+            node-version: "22"
+      - node/install-packages:
+          with:
+            app-dir: ./frontend
+      - run: npm test
+```
+
+`circleci function add setup-node --as node` adds the `functions:` entry at
+the latest version. The alias is yours to choose. A step named after it
+installs Node.js, and `<alias>/install-packages` runs `install-packages`. Each
+flag below becomes a `with:` key without its leading `--`, and a step with no
+flags needs no `with:` at all.
+
+Where the `functions:` block isn't available, as on CircleCI Server, run the
+function by its full name instead:
+
+```yaml
+- run: circleci run github.com/circleci-functions/setup-node@<version> -- --node-version 22
+- run: circleci run github.com/circleci-functions/setup-node@<version> -- install-packages --app-dir ./frontend
 ```
 
 ## Installing Node.js
@@ -48,7 +69,9 @@ Or read the version from a file with `--node-version-file`:
 | `package.json` | `volta.node`, then the `node` entry in `devEngines.runtime`, then `engines.node`, then the file `volta.extends` names |
 
 ```yaml
-- run: circleci run github.com/circleci-functions/setup-node@<version> -- --node-version-file .nvmrc
+- node:
+    with:
+      node-version-file: .nvmrc
 ```
 
 With neither flag, setup-node uses `.nvmrc`, then `.node-version`, from the
@@ -72,9 +95,11 @@ executables will not be on `PATH`.
 Node.js; install the others with npm:
 
 ```yaml
-- run: circleci run github.com/circleci-functions/setup-node@<version> -- --node-version 24
+- node:
+    with:
+      node-version: "24"
 - run: npm install --global pnpm@10
-- run: circleci run github.com/circleci-functions/setup-node@<version> -- install-packages
+- node/install-packages
 ```
 
 ### Mirrors
@@ -89,7 +114,10 @@ token is never sent to nodejs.org: with no mirror set, setup-node warns and
 downloads without it.
 
 ```yaml
-- run: circleci run github.com/circleci-functions/setup-node@<version> -- --node-version 22 --mirror https://mirror.example.com/node
+- node:
+    with:
+      node-version: "22"
+      mirror: https://mirror.example.com/node
 ```
 
 ### Caching the install
@@ -116,7 +144,9 @@ frozen install, and caches what the package manager downloads, so later steps
 that run the package manager pick up the same cache automatically.
 
 ```yaml
-- run: circleci run github.com/circleci-functions/setup-node@<version> -- install-packages --app-dir ./frontend
+- node/install-packages:
+    with:
+      app-dir: ./frontend
 ```
 
 ### Choosing a package manager
@@ -135,7 +165,9 @@ When more than one is present they are matched in that order. Set
 `--package-manager` to pick one explicitly instead:
 
 ```yaml
-- run: circleci run github.com/circleci-functions/setup-node@<version> -- install-packages --package-manager pnpm
+- node/install-packages:
+    with:
+      package-manager: pnpm
 ```
 
 Each package manager runs a frozen install that fails if the lockfile is out of
@@ -143,7 +175,9 @@ sync: `npm ci`, or `<pm> install --frozen-lockfile` for yarn, pnpm and bun.
 Replace it entirely with `--override-command`:
 
 ```yaml
-- run: circleci run github.com/circleci-functions/setup-node@<version> -- install-packages --override-command "npm install --legacy-peer-deps"
+- node/install-packages:
+    with:
+      override-command: npm install --legacy-peer-deps
 ```
 
 ### Caching packages
