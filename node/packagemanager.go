@@ -116,7 +116,7 @@ func (pm PackageManager) CacheDir(ctx context.Context, appDir string) (string, e
 		return npmCacheDir(ctx, appDir, home), nil
 
 	case Yarn:
-		return yarnCacheDir(ctx, appDir, home)
+		return yarnCacheDir(ctx, appDir, home), nil
 
 	case PNPM:
 		out, err := inDir(exec.CommandContext(ctx, "pnpm", "store", "path"), appDir).Output()
@@ -164,21 +164,28 @@ func (pm PackageManager) Version(ctx context.Context, appDir string) (string, er
 // Yarn 2 and later have no such command and answer `yarn config get
 // cacheFolder` instead, which Yarn 1 answers with "undefined". If yarn answers
 // neither, it falls back to Yarn 1's default.
-func yarnCacheDir(ctx context.Context, appDir, home string) (string, error) {
+func yarnCacheDir(ctx context.Context, appDir, home string) string {
 	if out, err := inDir(exec.CommandContext(ctx, "yarn", "cache", "dir"), appDir).Output(); err == nil {
-		return strings.TrimSpace(string(out)), nil
+		return strings.TrimSpace(string(out))
 	}
 	out, err := inDir(exec.CommandContext(ctx, "yarn", "config", "get", "cacheFolder"), appDir).Output()
 	if dir := strings.TrimSpace(string(out)); err == nil && dir != "" && dir != "undefined" {
-		return dir, nil
+		return dir
 	}
 	if runtime.GOOS == "windows" {
-		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
-			return filepath.Join(localAppData, "Yarn", "Cache"), nil
-		}
-		return "", fmt.Errorf("yarn: could not determine cache dir")
+		return yarnWindowsCacheDir(os.Getenv("LOCALAPPDATA"), home)
 	}
-	return filepath.Join(home, ".cache", "yarn"), nil
+	return filepath.Join(home, ".cache", "yarn")
+}
+
+// yarnWindowsCacheDir returns Yarn 1's default cache directory on Windows. It
+// is under %LOCALAPPDATA%, and Yarn 1 uses home's AppData\Local in its place
+// when that is unset, so setup-node does the same rather than failing.
+func yarnWindowsCacheDir(localAppData, home string) string {
+	if localAppData == "" {
+		localAppData = filepath.Join(home, "AppData", "Local")
+	}
+	return filepath.Join(localAppData, "Yarn", "Cache")
 }
 
 // npmCacheDir asks npm where its cache is, falling back to where npm puts it
