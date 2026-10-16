@@ -24,6 +24,12 @@ parameters:
     default: "1.22.22"
     description: >-
       Yarn version for the acceptance tests to install.
+  yarn-berry-version:
+    type: string
+    default: "4.18.1"
+    description: >-
+      Yarn 2+ version for the Yarn 2+ acceptance test to install alongside the
+      Yarn 1 the rest of the suite uses.
 
 executors:
   go:
@@ -163,6 +169,7 @@ jobs:
             # round-trips here exercise the real thing. The suite fails rather
             # than falling back if it can't reach it.
             TOOLKIT_CACHE_MODE: live
+            SETUP_NODE_ACCEPTANCE_YARN_BERRY_VERSION: << pipeline.parameters.yarn-berry-version >>
       - store_test_results:
           path: test-results
 
