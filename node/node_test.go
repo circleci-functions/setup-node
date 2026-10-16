@@ -124,3 +124,17 @@ func TestCacheDirs_Bun_HonoursXDGCacheHome(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, dir, filepath.Join(xdg, ".bun", "install", "cache"))
 }
+
+// pnpm says why it can't report its store on stderr, which the error has to
+// carry: on its own, the exit status tells the reader nothing.
+func TestCacheDirs_PNPM_ErrorCarriesStderr(t *testing.T) {
+	skip.If(t, runtime.GOOS == "windows", "the pnpm stub is a shell script")
+	stub := t.TempDir()
+	script := "#!/bin/sh\necho ERR_PNPM_STORE_BROKEN the store is unreadable >&2\nexit 1\n"
+	//nolint:gosec // test stub with fixed content; 0700 so it is executable
+	assert.NilError(t, os.WriteFile(filepath.Join(stub, "pnpm"), []byte(script), 0700))
+	t.Setenv("PATH", stub)
+
+	_, err := node.PNPM.CacheDir(context.Background(), t.TempDir())
+	assert.ErrorContains(t, err, "pnpm store path: exit status 1: ERR_PNPM_STORE_BROKEN the store is unreadable")
+}

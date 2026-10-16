@@ -36,15 +36,23 @@ func TestCLI_InstallPackages_AppDirDoesNotExist(t *testing.T) {
 }
 
 // TestCLI_InstallPackages_PackageManagerNotOnPATH verifies that an explicitly named
-// package manager missing from PATH is a clear error. PATH is pointed at an
-// empty dir so no package manager binary is found.
+// package manager missing from PATH is a clear error, with caching on or off.
+// pnpm and yarn are asked for their cache directory when caching is on, so a
+// check that ran only before the install would be preempted by that query's
+// error. PATH is pointed at an empty dir so no package manager binary is found.
 func TestCLI_InstallPackages_PackageManagerNotOnPATH(t *testing.T) {
-	_, run := sandbox(t)
-	appDir := copyFixture(t, "npm")
+	for _, pm := range []string{"npm", "yarn", "pnpm", "bun"} {
+		for _, cache := range []string{"--cache=true", "--cache=false"} {
+			t.Run(pm+" "+cache, func(t *testing.T) {
+				_, run := sandbox(t)
+				appDir := copyFixture(t, "npm")
 
-	out, err := run(t, map[string]string{"PATH": t.TempDir()},
-		"install-packages", "--app-dir", appDir, "--package-manager", "npm")
-	assert.Assert(t, err != nil, "expected non-zero exit; output: %s", out)
-	assert.Assert(t, strings.Contains(out, "not found"),
-		"expected the error to mention the binary was not found; got: %s", out)
+				out, err := run(t, map[string]string{"PATH": t.TempDir()},
+					"install-packages", "--app-dir", appDir, "--package-manager", pm, cache)
+				assert.Assert(t, err != nil, "expected non-zero exit; output: %s", out)
+				assert.Assert(t, strings.Contains(out, pm+" binary not found on PATH"),
+					"expected the error to mention the binary was not found; got: %s", out)
+			})
+		}
+	}
 }
