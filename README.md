@@ -164,6 +164,12 @@ When nothing is saved for the current lockfile yet, the most recent cache with
 everything else the same is restored instead, so only the packages that changed
 are downloaded.
 
+The cache directory is whatever the package manager reports: `npm config get
+cache`, `yarn cache dir` on Yarn 1, `yarn config get cacheFolder` on Yarn 2
+and later, `pnpm store path`, or `bun pm cache`. Yarn 2 and 3 keep their cache
+in the project's own `.yarn/cache` unless `enableGlobalCache` is set, so that
+is the folder cached for them.
+
 Nothing is exported to `$BASH_ENV`: each package manager resolves the same
 cache directory on its own, so later steps read and write it whatever shell
 they run in.

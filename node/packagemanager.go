@@ -117,20 +117,7 @@ func (pm PackageManager) CacheDir(ctx context.Context, appDir string) (string, e
 		return npmCacheDir(ctx, appDir, home), nil
 
 	case Yarn:
-		// Ask yarn where its cache lives.
-		out, err := inDir(exec.CommandContext(ctx, "yarn", "cache", "dir"), appDir).Output()
-		if err != nil {
-			// Fall back to the conventional default.
-			if runtime.GOOS == "windows" {
-				if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
-					return filepath.Join(localAppData, "Yarn", "Cache"), nil
-				} else {
-					return "", fmt.Errorf("yarn: could not determine cache dir")
-				}
-			}
-			return filepath.Join(home, ".cache", "yarn"), nil
-		}
-		return strings.TrimSpace(string(out)), nil
+		return yarnCacheDir(ctx, appDir, home)
 
 	case PNPM:
 		out, err := output(inDir(exec.CommandContext(ctx, "pnpm", "store", "path"), appDir))
@@ -172,6 +159,27 @@ func (pm PackageManager) Version(ctx context.Context, appDir string) (string, er
 		return "", fmt.Errorf("%s --version printed nothing", pm)
 	}
 	return fields[len(fields)-1], nil
+}
+
+// yarnCacheDir asks yarn where its cache is. Yarn 1 answers `yarn cache dir`.
+// Yarn 2 and later have no such command and answer `yarn config get
+// cacheFolder` instead, which Yarn 1 answers with "undefined". If yarn answers
+// neither, it falls back to Yarn 1's default.
+func yarnCacheDir(ctx context.Context, appDir, home string) (string, error) {
+	if out, err := inDir(exec.CommandContext(ctx, "yarn", "cache", "dir"), appDir).Output(); err == nil {
+		return strings.TrimSpace(string(out)), nil
+	}
+	out, err := inDir(exec.CommandContext(ctx, "yarn", "config", "get", "cacheFolder"), appDir).Output()
+	if dir := strings.TrimSpace(string(out)); err == nil && dir != "" && dir != "undefined" {
+		return dir, nil
+	}
+	if runtime.GOOS == "windows" {
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			return filepath.Join(localAppData, "Yarn", "Cache"), nil
+		}
+		return "", fmt.Errorf("yarn: could not determine cache dir")
+	}
+	return filepath.Join(home, ".cache", "yarn"), nil
 }
 
 // npmCacheDir asks npm where its cache is, falling back to where npm puts it
