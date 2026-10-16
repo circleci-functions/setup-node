@@ -45,6 +45,19 @@ machine it runs on from nodejs.org, checks it against the release's
 `corepack` into a directory already on `PATH`. Later steps run them by name,
 in any shell, without sourcing anything.
 
+It links into `~/.local/bin`, `~/bin` or `/usr/local/bin`: the first of them
+that is on `PATH` ahead of any `node` already there and writable without
+`sudo`. A preinstalled Node.js is then shadowed, not changed. Failing that,
+setup-node takes over the directory the preinstalled `node` is in: its `node`,
+`npm`, `npx` and `corepack` are replaced with links to the new install, and
+the files they replace are deleted. That applies to a version manager's own
+`bin` directory too, if it's writable. If the directory is root-owned, the
+links are made with `sudo -n`, which fails the step rather than waiting where
+`sudo` needs a password. With no `node` on `PATH`, it links into the first
+writable directory on `PATH` that no version manager owns, or else into
+`/usr/local/bin`, with `sudo -n` if that needs it. Windows is covered under
+[Platform support](#platform-support).
+
 ### Choosing a version
 
 `--node-version` takes any of:
@@ -127,6 +140,12 @@ architecture and Node.js version, so later jobs restore it rather than
 downloading it again. A cache problem never fails the job. Turn it off with
 `--cache=false`.
 
+The install is saved as soon as it is unpacked, before setup-node changes npm's
+global prefix (see [Global npm installs](#global-npm-installs)), so the saved
+copy doesn't carry that setting; each job sets it again. On a cache miss, even
+an exact version such as `22.11.0` fetches `index.json` from the mirror before
+downloading.
+
 ### Flags
 
 | Flag | Default | Description |
@@ -136,6 +155,10 @@ downloading it again. A cache problem never fails the job. Turn it off with
 | `--mirror` | `https://nodejs.org/dist` | Server to download Node.js from; also read from `$NODE_MIRROR` |
 | `--mirror-token` | (empty) | `Authorization` header value for `--mirror`, never sent to nodejs.org; also read from `$NODE_MIRROR_TOKEN` |
 | `--cache` | true | Set `--cache=false` to disable caching the install |
+| `--install-dir` | `~/.cache/setup-node` | Directory to unpack Node.js versions under |
+
+`--install-dir` is not one of the function's published arguments, so it can't
+be set under `with:`. Pass it in the `circleci run` form instead.
 
 ## Installing dependencies
 

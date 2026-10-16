@@ -16,7 +16,7 @@ import (
 // manager, restoring and saving the package manager's download cache around
 // the install so later steps start warm.
 type installPackagesCmd struct {
-	AppDir          string `help:"Directory containing package.json." default:"."`
+	AppDir          string `help:"Directory containing package.json and the lockfile." default:"."`
 	PackageManager  string `help:"Package manager to use: npm, yarn, pnpm, or bun. Auto-detected from lockfile if omitted." enum:"npm,yarn,pnpm,bun," default:""`
 	OverrideCommand string `help:"Override the default CI install command (e.g. 'npm install --legacy-peer-deps')."`
 	Cache           bool   `help:"Restore the package manager cache before installing and save it at the end. Set to false to disable caching." default:"true"`
