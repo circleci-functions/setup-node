@@ -3,6 +3,7 @@ package clitest_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -14,6 +15,13 @@ import (
 // pnpm stub on that PATH the way a global install would.
 func provisionEnv(t *testing.T) (path, npmArgs string) {
 	t.Helper()
+	return provisionEnvWithRoot(t, t.TempDir())
+}
+
+// provisionEnvWithRoot is provisionEnv with an npm whose `npm root --global`
+// reports root.
+func provisionEnvWithRoot(t *testing.T, root string) (path, npmArgs string) {
+	t.Helper()
 	staged := t.TempDir()
 	pnpm := "#!/bin/sh\ncase \"$1\" in\nstore) echo '" + t.TempDir() + "' ;;\n--version) echo 9.1.0 ;;\nesac\nexit 0\n"
 	//nolint:gosec // test stub with fixed content; 0700 so it is executable
@@ -21,7 +29,8 @@ func provisionEnv(t *testing.T) (path, npmArgs string) {
 
 	bin := t.TempDir()
 	npmArgs = filepath.Join(t.TempDir(), "npm-args")
-	npm := "#!/bin/sh\necho \"$@\" >> '" + npmArgs + "'\n" +
+	npm := "#!/bin/sh\n[ \"$1\" = root ] && echo '" + root + "' && exit 0\n" +
+		"echo \"$@\" >> '" + npmArgs + "'\n" +
 		"case \"$3\" in pnpm@*) cp '" + filepath.Join(staged, "pnpm") + "' '" + bin + "' ;; esac\n"
 	//nolint:gosec // test stub with fixed content; 0700 so it is executable
 	assert.NilError(t, os.WriteFile(filepath.Join(bin, "npm"), []byte(npm), 0700))
@@ -100,4 +109,32 @@ func TestCLI_InstallPackages_PinnedPackageManagerStillMissing(t *testing.T) {
 	got, err := os.ReadFile(npmArgs) //nolint:gosec // a path this test chose
 	assert.NilError(t, err, "npm was not run; output: %s", out)
 	assert.Equal(t, strings.TrimSpace(string(got)), "install --global bun@1.1.38")
+}
+
+// TestCLI_InstallPackages_GlobalPrefixNotWritable verifies that a pinned
+// package manager npm couldn't install, because the user can't write to npm's
+// global prefix as with a system Node.js, fails before npm runs, saying what
+// to change, rather than with npm's EACCES.
+func TestCLI_InstallPackages_GlobalPrefixNotWritable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a read-only mode does not stop writes to a directory on Windows")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("root can write to a read-only directory")
+	}
+	_, run := sandbox(t)
+	root := t.TempDir()
+	assert.NilError(t, os.Chmod(root, 0500))       //nolint:gosec // the point is that it is not writable
+	t.Cleanup(func() { _ = os.Chmod(root, 0750) }) //nolint:gosec // restores what t.TempDir needs to clean up
+	path, npmArgs := provisionEnvWithRoot(t, root)
+	appDir := copyFixture(t, "pnpm")
+	writeManifest(t, appDir, `{"packageManager": "pnpm@9.1.0"}`)
+
+	out, err := run(t, map[string]string{"PATH": path}, "install-packages", "--app-dir", appDir)
+	assert.Assert(t, err != nil, "expected non-zero exit; output: %s", out)
+	assert.Assert(t, strings.Contains(out, "can't write to npm's global packages directory "+root), "got: %s", out)
+	assert.Assert(t, strings.Contains(out, "run setup-node without a command first"), "got: %s", out)
+
+	_, statErr := os.Stat(npmArgs)
+	assert.Assert(t, os.IsNotExist(statErr), "expected npm not to install anything; output: %s", out)
 }

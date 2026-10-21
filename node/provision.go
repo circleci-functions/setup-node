@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/circleci-functions/toolkit/pathlink"
 )
 
 // EnsureBinary makes sure pm's executable is on PATH before anything runs it,
@@ -33,6 +35,10 @@ func (pm PackageManager) EnsureBinary(ctx context.Context, appDir string) error 
 	}
 
 	pkg := pm.npmPackage(version)
+	if root := globalRoot(ctx); root != "" && !pathlink.Writable(root) {
+		return fmt.Errorf("%s binary not found on PATH, and npm can't install %s: this user can't write to npm's global packages directory %s; "+
+			"run setup-node without a command first, so npm uses the Node.js it installs, or install %s in an earlier step", pm, pkg, root, pm)
+	}
 	fmt.Fprintf(os.Stderr, "setup-node: %s is not on PATH; installing %s, the version package.json's packageManager pins\n", pm, pkg)
 	cmd := exec.CommandContext(ctx, "npm", "install", "--global", pkg)
 	cmd.Dir = appDir
@@ -45,6 +51,16 @@ func (pm PackageManager) EnsureBinary(ctx context.Context, appDir string) error 
 		return fmt.Errorf("installed %s with npm, but %s is still not on PATH; put npm's global bin directory (under `npm prefix --global`) on PATH", pkg, pm)
 	}
 	return nil
+}
+
+// globalRoot returns the directory `npm install --global` puts packages in,
+// or "" if npm can't say.
+func globalRoot(ctx context.Context) string {
+	out, err := exec.CommandContext(ctx, "npm", "root", "--global").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // pinnedVersion returns the version of pm that appDir's package.json pins with
