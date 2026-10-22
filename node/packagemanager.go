@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -66,7 +67,7 @@ func (pm PackageManager) Lockfile() string {
 func (pm PackageManager) installCommand() []string {
 	switch pm {
 	case NPM:
-		return []string{"npm", "ci"}
+		return []string{"npm", "ci", "--no-audit", "--no-fund"}
 	case Yarn:
 		return []string{"yarn", "install", "--frozen-lockfile"}
 	case PNPM:
@@ -116,23 +117,10 @@ func (pm PackageManager) CacheDir(ctx context.Context, appDir string) (string, e
 		return npmCacheDir(ctx, appDir, home), nil
 
 	case Yarn:
-		// Ask yarn where its cache lives.
-		out, err := inDir(exec.CommandContext(ctx, "yarn", "cache", "dir"), appDir).Output()
-		if err != nil {
-			// Fall back to the conventional default.
-			if runtime.GOOS == "windows" {
-				if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
-					return filepath.Join(localAppData, "Yarn", "Cache"), nil
-				} else {
-					return "", fmt.Errorf("yarn: could not determine cache dir")
-				}
-			}
-			return filepath.Join(home, ".cache", "yarn"), nil
-		}
-		return strings.TrimSpace(string(out)), nil
+		return yarnCacheDir(ctx, appDir, home), nil
 
 	case PNPM:
-		out, err := inDir(exec.CommandContext(ctx, "pnpm", "store", "path"), appDir).Output()
+		out, err := output(inDir(exec.CommandContext(ctx, "pnpm", "store", "path"), appDir))
 		if err != nil {
 			return "", fmt.Errorf("pnpm store path: %w", err)
 		}
@@ -162,7 +150,7 @@ func (pm PackageManager) CacheDir(ctx context.Context, appDir string) (string, e
 // packageManager field can pin a different one through corepack. A cache
 // written by one version may be laid out differently from what another reads.
 func (pm PackageManager) Version(ctx context.Context, appDir string) (string, error) {
-	out, err := inDir(exec.CommandContext(ctx, pm.Binary(), "--version"), appDir).Output() //nolint:gosec // pm is one of a fixed set of package managers
+	out, err := output(inDir(exec.CommandContext(ctx, pm.Binary(), "--version"), appDir)) //nolint:gosec // pm is one of a fixed set of package managers
 	if err != nil {
 		return "", fmt.Errorf("%s --version: %w", pm, err)
 	}
@@ -171,6 +159,34 @@ func (pm PackageManager) Version(ctx context.Context, appDir string) (string, er
 		return "", fmt.Errorf("%s --version printed nothing", pm)
 	}
 	return fields[len(fields)-1], nil
+}
+
+// yarnCacheDir asks yarn where its cache is. Yarn 1 answers `yarn cache dir`.
+// Yarn 2 and later have no such command and answer `yarn config get
+// cacheFolder` instead, which Yarn 1 answers with "undefined". If yarn answers
+// neither, it falls back to Yarn 1's default.
+func yarnCacheDir(ctx context.Context, appDir, home string) string {
+	if out, err := inDir(exec.CommandContext(ctx, "yarn", "cache", "dir"), appDir).Output(); err == nil {
+		return strings.TrimSpace(string(out))
+	}
+	out, err := inDir(exec.CommandContext(ctx, "yarn", "config", "get", "cacheFolder"), appDir).Output()
+	if dir := strings.TrimSpace(string(out)); err == nil && dir != "" && dir != "undefined" {
+		return dir
+	}
+	if runtime.GOOS == "windows" {
+		return yarnWindowsCacheDir(os.Getenv("LOCALAPPDATA"), home)
+	}
+	return filepath.Join(home, ".cache", "yarn")
+}
+
+// yarnWindowsCacheDir returns Yarn 1's default cache directory on Windows. It
+// is under %LOCALAPPDATA%, and Yarn 1 uses home's AppData\Local in its place
+// when that is unset, so setup-node does the same rather than failing.
+func yarnWindowsCacheDir(localAppData, home string) string {
+	if localAppData == "" {
+		localAppData = filepath.Join(home, "AppData", "Local")
+	}
+	return filepath.Join(localAppData, "Yarn", "Cache")
 }
 
 // npmCacheDir asks npm where its cache is, falling back to where npm puts it
@@ -191,6 +207,19 @@ func npmCacheDir(ctx context.Context, appDir, home string) string {
 	return filepath.Join(home, ".npm")
 }
 
+// output runs cmd and returns its stdout. A failure carries what cmd wrote to
+// stderr, since that is where a package manager says why it failed.
+func output(cmd *exec.Cmd) ([]byte, error) {
+	out, err := cmd.Output()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if stderr := strings.TrimSpace(string(exitErr.Stderr)); stderr != "" {
+			return out, fmt.Errorf("%w: %s", err, stderr)
+		}
+	}
+	return out, err
+}
+
 // inDir runs cmd from dir, so a package manager answers for the project rather
 // than for wherever the function happens to be running.
 func inDir(cmd *exec.Cmd, dir string) *exec.Cmd {
@@ -203,11 +232,6 @@ func inDir(cmd *exec.Cmd, dir string) *exec.Cmd {
 // pm.InstallCommand(), stdout and stderr are forwarded to the process's own
 // stdout/stderr so output is visible to the caller.
 func (pm PackageManager) InstallPackages(ctx context.Context, appDir, overrideCommand string) error {
-	// Check that the PackageManager's binary exists in PATH
-	if _, err := exec.LookPath(pm.Binary()); err != nil {
-		return fmt.Errorf("%s binary not found on PATH", pm)
-	}
-
 	args, err := pm.buildArgs(overrideCommand)
 	if err != nil {
 		return err
