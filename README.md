@@ -5,15 +5,36 @@ job. An optional `install-packages` command then installs your dependencies
 with the right package manager, caching what it downloads.
 
 ```yaml
-steps:
-  - checkout
-  - run:
-      name: Install Node.js
-      command: circleci run github.com/circleci-functions/setup-node@<version> -- --node-version 22
-  - run:
-      name: Install dependencies
-      command: circleci run github.com/circleci-functions/setup-node@<version> -- install-packages --app-dir ./frontend
-  - run: npm test
+functions:
+  node: github.com/circleci-functions/setup-node@<version>
+
+jobs:
+  test:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - node:
+          with:
+            node-version: "22"
+      - node/install-packages:
+          with:
+            app-dir: ./frontend
+      - run: npm test
+```
+
+`circleci function add setup-node --as node` adds the `functions:` entry at
+the latest version. The alias is yours to choose. A step named after it
+installs Node.js, and `<alias>/install-packages` runs `install-packages`. Each
+flag below becomes a `with:` key without its leading `--`, and a step with no
+flags needs no `with:` at all.
+
+Where the `functions:` block isn't available, as on CircleCI Server, run the
+function by its full name instead:
+
+```yaml
+- run: circleci run github.com/circleci-functions/setup-node@<version> -- --node-version 22
+- run: circleci run github.com/circleci-functions/setup-node@<version> -- install-packages --app-dir ./frontend
 ```
 
 ## Installing Node.js
@@ -26,10 +47,18 @@ in any shell, without sourcing anything.
 
 ### Where Node.js is linked
 
-The link directory is chosen by preference from directories already on `PATH`.
-When an existing binary is replaced, it is kept as `<name>.pathlink-old` in the
-same directory. If the chosen directory is not writable, setup-node falls back
-to `sudo -n ln`; on macOS system directories, sudo is skipped.
+It links into `~/.local/bin`, `~/bin` or `/usr/local/bin`: the first of them
+that is on `PATH` ahead of any `node` already there and writable without
+`sudo`. A preinstalled Node.js is then shadowed, not changed. Failing that,
+setup-node takes over the directory the preinstalled `node` is in: its `node`,
+`npm`, `npx` and `corepack` are replaced with links to the new install, and
+the files they replace are kept beside them as `<name>.pathlink-old`. That
+applies to a version manager's own `bin` directory too, if it's writable. If the directory is root-owned, the
+links are made with `sudo -n`, which fails the step rather than waiting where
+`sudo` needs a password. With no `node` on `PATH`, it links into the first
+writable directory on `PATH` that no version manager owns, or else into
+`/usr/local/bin`, with `sudo -n` if that needs it. Windows is covered under
+[Platform support](#platform-support).
 
 ### Choosing a version
 
@@ -55,7 +84,9 @@ Or read the version from a file with `--node-version-file`:
 | `package.json` | `volta.node`, then the `node` entry in `devEngines.runtime`, then `engines.node`, then the file `volta.extends` names |
 
 ```yaml
-- run: circleci run github.com/circleci-functions/setup-node@<version> -- --node-version-file .nvmrc
+- node:
+    with:
+      node-version-file: .nvmrc
 ```
 
 With neither flag, setup-node uses `.nvmrc`, then `.node-version`, from the
@@ -87,9 +118,11 @@ With no pin, a missing package manager fails the step, so install it in an
 earlier step:
 
 ```yaml
-- run: circleci run github.com/circleci-functions/setup-node@<version> -- --node-version 24
+- node:
+    with:
+      node-version: "24"
 - run: npm install --global pnpm@10
-- run: circleci run github.com/circleci-functions/setup-node@<version> -- install-packages
+- node/install-packages
 ```
 
 ### Mirrors
@@ -104,7 +137,10 @@ token is never sent to nodejs.org: with no mirror set, setup-node warns and
 downloads without it.
 
 ```yaml
-- run: circleci run github.com/circleci-functions/setup-node@<version> -- --node-version 22 --mirror https://mirror.example.com/node
+- node:
+    with:
+      node-version: "22"
+      mirror: https://mirror.example.com/node
 ```
 
 ### Caching the install
@@ -113,6 +149,12 @@ The unpacked install is saved to the job cache under a key made of the OS,
 architecture and Node.js version, so later jobs restore it rather than
 downloading it again. A cache problem never fails the job. Turn it off with
 `--cache=false`.
+
+The install is saved as soon as it is unpacked, before setup-node changes npm's
+global prefix (see [Global npm installs](#global-npm-installs)), so the saved
+copy doesn't carry that setting; each job sets it again. On a cache miss, even
+an exact version such as `22.11.0` fetches `index.json` from the mirror before
+downloading.
 
 ### Flags
 
@@ -123,6 +165,10 @@ downloading it again. A cache problem never fails the job. Turn it off with
 | `--mirror` | `https://nodejs.org/dist` | Server to download Node.js from; also read from `$NODE_MIRROR` |
 | `--mirror-token` | (empty) | `Authorization` header value for `--mirror`, never sent to nodejs.org; also read from `$NODE_MIRROR_TOKEN` |
 | `--cache` | true | Set `--cache=false` to disable caching the install |
+| `--install-dir` | `~/.cache/setup-node` | Directory to unpack Node.js versions under |
+
+`--install-dir` is not one of the function's published arguments, so it can't
+be set under `with:`. Pass it in the `circleci run` form instead.
 
 ## Installing dependencies
 
@@ -131,7 +177,9 @@ frozen install, and caches what the package manager downloads, so later steps
 that run the package manager pick up the same cache automatically.
 
 ```yaml
-- run: circleci run github.com/circleci-functions/setup-node@<version> -- install-packages --app-dir ./frontend
+- node/install-packages:
+    with:
+      app-dir: ./frontend
 ```
 
 ### Choosing a package manager
@@ -150,7 +198,9 @@ When more than one is present they are matched in that order. Set
 `--package-manager` to pick one explicitly instead:
 
 ```yaml
-- run: circleci run github.com/circleci-functions/setup-node@<version> -- install-packages --package-manager pnpm
+- node/install-packages:
+    with:
+      package-manager: pnpm
 ```
 
 Each package manager runs a frozen install that fails if the lockfile is out of
@@ -160,7 +210,9 @@ the install and don't fail it; run `npm audit` as its own step to act on
 vulnerabilities. Replace the command entirely with `--override-command`:
 
 ```yaml
-- run: circleci run github.com/circleci-functions/setup-node@<version> -- install-packages --override-command "npm install --legacy-peer-deps"
+- node/install-packages:
+    with:
+      override-command: npm install --legacy-peer-deps
 ```
 
 ### Caching packages
