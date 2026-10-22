@@ -24,6 +24,13 @@ machine it runs on from nodejs.org, checks it against the release's
 `corepack` into a directory already on `PATH`. Later steps run them by name,
 in any shell, without sourcing anything.
 
+### Where Node.js is linked
+
+The link directory is chosen by preference from directories already on `PATH`.
+When an existing binary is replaced, it is kept as `<name>.pathlink-old` in the
+same directory. If the chosen directory is not writable, setup-node falls back
+to `sudo -n ln`; on macOS system directories, sudo is skipped.
+
 ### Choosing a version
 
 `--node-version` takes any of:
