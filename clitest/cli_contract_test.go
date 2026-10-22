@@ -1,6 +1,8 @@
 package clitest_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -36,15 +38,45 @@ func TestCLI_InstallPackages_AppDirDoesNotExist(t *testing.T) {
 }
 
 // TestCLI_InstallPackages_PackageManagerNotOnPATH verifies that an explicitly named
-// package manager missing from PATH is a clear error. PATH is pointed at an
-// empty dir so no package manager binary is found.
+// package manager missing from PATH is a clear error, with caching on or off.
+// pnpm and yarn are asked for their cache directory when caching is on, so a
+// check that ran only before the install would be preempted by that query's
+// error. PATH is pointed at an empty dir so no package manager binary is found.
 func TestCLI_InstallPackages_PackageManagerNotOnPATH(t *testing.T) {
+	for _, pm := range []string{"npm", "yarn", "pnpm", "bun"} {
+		for _, cache := range []string{"--cache=true", "--cache=false"} {
+			t.Run(pm+" "+cache, func(t *testing.T) {
+				_, run := sandbox(t)
+				appDir := copyFixture(t, "npm")
+
+				out, err := run(t, map[string]string{"PATH": t.TempDir()},
+					"install-packages", "--app-dir", appDir, "--package-manager", pm, cache)
+				assert.Assert(t, err != nil, "expected non-zero exit; output: %s", out)
+				assert.Assert(t, strings.Contains(out, pm+" binary not found on PATH"),
+					"expected the error to mention the binary was not found; got: %s", out)
+			})
+		}
+	}
+}
+
+// TestCLI_InstallPackages_DefaultNpmCommand verifies that npm's default install
+// is a clean install that skips npm's audit and funding checks, which a CI
+// install has no use for.
+func TestCLI_InstallPackages_DefaultNpmCommand(t *testing.T) {
 	_, run := sandbox(t)
 	appDir := copyFixture(t, "npm")
 
-	out, err := run(t, map[string]string{"PATH": t.TempDir()},
-		"install-packages", "--app-dir", appDir, "--package-manager", "npm")
-	assert.Assert(t, err != nil, "expected non-zero exit; output: %s", out)
-	assert.Assert(t, strings.Contains(out, "not found"),
-		"expected the error to mention the binary was not found; got: %s", out)
+	argsFile := filepath.Join(t.TempDir(), "args")
+	stub := t.TempDir()
+	script := "#!/bin/sh\necho \"$@\" > '" + argsFile + "'\n"
+	//nolint:gosec // test stub with fixed content; 0700 so it is executable
+	assert.NilError(t, os.WriteFile(filepath.Join(stub, "npm"), []byte(script), 0700))
+
+	out, err := run(t, map[string]string{"PATH": stub + string(os.PathListSeparator) + os.Getenv("PATH")},
+		"install-packages", "--app-dir", appDir, "--cache=false")
+	assert.NilError(t, err, "output: %s", out)
+
+	got, err := os.ReadFile(argsFile) //nolint:gosec // a path this test chose
+	assert.NilError(t, err, "npm was not run; output: %s", out)
+	assert.Equal(t, strings.TrimSpace(string(got)), "ci --no-audit --no-fund")
 }

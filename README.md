@@ -45,13 +45,15 @@ machine it runs on from nodejs.org, checks it against the release's
 `corepack` into a directory already on `PATH`. Later steps run them by name,
 in any shell, without sourcing anything.
 
+### Where Node.js is linked
+
 It links into `~/.local/bin`, `~/bin` or `/usr/local/bin`: the first of them
 that is on `PATH` ahead of any `node` already there and writable without
 `sudo`. A preinstalled Node.js is then shadowed, not changed. Failing that,
 setup-node takes over the directory the preinstalled `node` is in: its `node`,
 `npm`, `npx` and `corepack` are replaced with links to the new install, and
-the files they replace are deleted. That applies to a version manager's own
-`bin` directory too, if it's writable. If the directory is root-owned, the
+the files they replace are kept beside them as `<name>.pathlink-old`. That
+applies to a version manager's own `bin` directory too, if it's writable. If the directory is root-owned, the
 links are made with `sudo -n`, which fails the step rather than waiting where
 `sudo` needs a password. With no `node` on `PATH`, it links into the first
 writable directory on `PATH` that no version manager owns, or else into
@@ -104,8 +106,16 @@ executables will not be on `PATH`.
 
 ### Package managers
 
-`install-packages` needs the package manager already on `PATH`. npm comes with
-Node.js; install the others with npm:
+`install-packages` runs the package manager on `PATH`, whatever its version.
+npm comes with Node.js. If pnpm, yarn or bun is missing and `package.json` pins
+it with `packageManager` (e.g. `"packageManager": "pnpm@10.12.1"`),
+`install-packages` installs that version with `npm install --global` first.
+Yarn 2 and later come from npm's `@yarnpkg/cli-dist` package, since the `yarn`
+package stops at Yarn 1. corepack is not used: Node.js 25 and later don't ship
+it.
+
+With no pin, a missing package manager fails the step, so install it in an
+earlier step:
 
 ```yaml
 - node:
@@ -194,8 +204,10 @@ When more than one is present they are matched in that order. Set
 ```
 
 Each package manager runs a frozen install that fails if the lockfile is out of
-sync: `npm ci`, or `<pm> install --frozen-lockfile` for yarn, pnpm and bun.
-Replace it entirely with `--override-command`:
+sync: `npm ci --no-audit --no-fund`, or `<pm> install --frozen-lockfile` for
+yarn, pnpm and bun. npm's audit and funding checks are off because they slow
+the install and don't fail it; run `npm audit` as its own step to act on
+vulnerabilities. Replace the command entirely with `--override-command`:
 
 ```yaml
 - node/install-packages:
@@ -213,15 +225,22 @@ When nothing is saved for the current lockfile yet, the most recent cache with
 everything else the same is restored instead, so only the packages that changed
 are downloaded.
 
+The cache directory is whatever the package manager reports: `npm config get
+cache`, `yarn cache dir` on Yarn 1, `yarn config get cacheFolder` on Yarn 2
+and later, `pnpm store path`, or `bun pm cache`. Yarn 2 and 3 keep their cache
+in the project's own `.yarn/cache` unless `enableGlobalCache` is set, so that
+is the folder cached for them.
+
 Nothing is exported to `$BASH_ENV`: each package manager resolves the same
 cache directory on its own, so later steps read and write it whatever shell
 they run in.
 
-Turn caching off with `--cache=false`. Cache problems never fail the job, and
-if the lockfile can't be read (e.g. a `bun.lockb`-only repo, or
-`--override-command` with nothing checked out), or the package manager can't
-report its version, caching is skipped with a warning while the install still
-runs.
+Turn caching off with `--cache=false`. Cache problems never fail the job: if
+the package manager can't report its cache directory or its version, or the
+lockfile can't be read (e.g. a `bun.lockb`-only repo, or `--override-command`
+with nothing checked out), caching is skipped with a warning while the install
+still runs. A package manager that is missing from `PATH` and not pinned in
+`package.json` fails the step, cache or no cache.
 
 ### Flags
 

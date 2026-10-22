@@ -109,6 +109,49 @@ func TestCacheDirs_NPM(t *testing.T) {
 	})
 }
 
+// Yarn 2 and later have no `yarn cache dir`, so their cache comes from
+// `yarn config get cacheFolder`. Yarn 1 answers that with "undefined", which
+// is not a directory.
+func TestCacheDirs_Yarn(t *testing.T) {
+	skip.If(t, runtime.GOOS == "windows", "the yarn stub is a shell script")
+
+	tests := []struct {
+		name   string
+		script string
+		want   func(home string) string
+	}{
+		{
+			name:   "yarn 1",
+			script: "#!/bin/sh\nif [ \"$1\" = cache ]; then echo /from/yarn-cache-dir; exit 0; fi\necho undefined\n",
+			want:   func(string) string { return "/from/yarn-cache-dir" },
+		},
+		{
+			name:   "yarn 2 and later",
+			script: "#!/bin/sh\nif [ \"$1\" = cache ]; then echo 'Unknown Syntax Error: Command not found'; exit 1; fi\necho /from/yarn-config\n",
+			want:   func(string) string { return "/from/yarn-config" },
+		},
+		{
+			name:   "neither answers",
+			script: "#!/bin/sh\nif [ \"$1\" = cache ]; then exit 1; fi\necho undefined\n",
+			want:   func(home string) string { return filepath.Join(home, ".cache", "yarn") },
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := t.TempDir()
+			//nolint:gosec // test stub with fixed content; 0700 so it is executable
+			assert.NilError(t, os.WriteFile(filepath.Join(stub, "yarn"), []byte(tc.script), 0700))
+			t.Setenv("PATH", stub)
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+
+			dir, err := node.Yarn.CacheDir(context.Background(), t.TempDir())
+			assert.NilError(t, err)
+			assert.Equal(t, dir, tc.want(home))
+		})
+	}
+}
+
 // bun resolves its cache from $BUN_INSTALL_CACHE_DIR, then $XDG_CACHE_HOME,
 // then $HOME — so a path built from $HOME alone is wrong whenever
 // XDG_CACHE_HOME is set, which is what a test sandbox does.
@@ -123,4 +166,18 @@ func TestCacheDirs_Bun_HonoursXDGCacheHome(t *testing.T) {
 	dir, err := node.Bun.CacheDir(context.Background(), t.TempDir())
 	assert.NilError(t, err)
 	assert.Equal(t, dir, filepath.Join(xdg, ".bun", "install", "cache"))
+}
+
+// pnpm says why it can't report its store on stderr, which the error has to
+// carry: on its own, the exit status tells the reader nothing.
+func TestCacheDirs_PNPM_ErrorCarriesStderr(t *testing.T) {
+	skip.If(t, runtime.GOOS == "windows", "the pnpm stub is a shell script")
+	stub := t.TempDir()
+	script := "#!/bin/sh\necho ERR_PNPM_STORE_BROKEN the store is unreadable >&2\nexit 1\n"
+	//nolint:gosec // test stub with fixed content; 0700 so it is executable
+	assert.NilError(t, os.WriteFile(filepath.Join(stub, "pnpm"), []byte(script), 0700))
+	t.Setenv("PATH", stub)
+
+	_, err := node.PNPM.CacheDir(context.Background(), t.TempDir())
+	assert.ErrorContains(t, err, "pnpm store path: exit status 1: ERR_PNPM_STORE_BROKEN the store is unreadable")
 }

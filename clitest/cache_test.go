@@ -241,3 +241,31 @@ func TestCLI_Cache_SkippedWhenLockfileMissing(t *testing.T) {
 	assert.Equal(t, len(rec.restores), 0, "expected no restore calls")
 	assert.Equal(t, len(rec.saves), 0, "expected no save calls")
 }
+
+// TestCLI_Cache_SkippedWhenCacheDirUnknown verifies that a package manager that
+// can't report its cache directory skips the cache with a warning that carries
+// the package manager's own reason, and still installs.
+func TestCLI_Cache_SkippedWhenCacheDirUnknown(t *testing.T) {
+	_, run := sandbox(t)
+	rec, pluginURL := newCacheRecorder(t)
+
+	appDir := copyFixture(t, "pnpm")
+	pnpm := `#!/bin/sh
+case "$1" in
+store) echo "ERR_PNPM_STORE_BROKEN the store is unreadable" >&2; exit 1 ;;
+--version) echo 10.0.0 ;;
+esac
+exit 0
+`
+	env := map[string]string{"CIRCLECI_PLUGIN_URL": pluginURL, "PATH": stubPATH(t, map[string]string{"pnpm": pnpm})}
+
+	out, err := run(t, env, "install-packages", "--app-dir", appDir, "--package-manager", "pnpm")
+	assert.NilError(t, err, "output: %s", out)
+	assert.Assert(t, strings.Contains(out, "skipping cache restore"),
+		"expected output to mention skipping cache restore; got: %s", out)
+	assert.Assert(t, strings.Contains(out, "ERR_PNPM_STORE_BROKEN the store is unreadable"),
+		"expected the warning to carry pnpm's stderr; got: %s", out)
+
+	assert.Equal(t, len(rec.restores), 0, "expected no restore calls")
+	assert.Equal(t, len(rec.saves), 0, "expected no save calls")
+}
