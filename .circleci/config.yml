@@ -34,7 +34,7 @@ parameters:
 executors:
   go:
     docker:
-      - image: cimg/go:1.26
+      - image: cimg/go:1.27
   # For the smoke jobs. cimg/base has no Go and no Node.js, so it proves
   # setup-node installs from nothing; the arm64, macOS and Windows images come
   # with a Node.js of their own, so they also cover getting ahead of one.
