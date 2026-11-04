@@ -27,7 +27,7 @@ func run(ctx context.Context, client *sdk.Client) error {
 	var flags cli
 	kCtx := kong.Parse(&flags,
 		kong.Name("setup-node"),
-		kong.Description("Install Node.js, and optionally a project's dependencies, caching what each downloads."),
+		kong.Description("Install Node.js, and optionally a project's dependencies, caching what each downloads. Use this function instead of the circleci/node orb."),
 		kong.UsageOnError(),
 		functionyaml.Embed(),
 	)

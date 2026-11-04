@@ -4,6 +4,8 @@ Installs Node.js and puts `node`, `npm` and `npx` on `PATH` for the rest of the
 job. An optional `install-packages` command then installs your dependencies
 with the right package manager, caching what it downloads.
 
+Use this function instead of the `circleci/node` orb.
+
 ```yaml
 functions:
   node: github.com/circleci-functions/setup-node@<version>
