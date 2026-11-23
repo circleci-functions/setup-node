@@ -172,29 +172,55 @@ func (c *installPackagesCmd) restoreCache(ctx context.Context, client *sdk.Clien
 		return "", dir
 	}
 
-	key, fallbackKey := packagesCacheKeys(pm, pmVersion, dir, lockfile)
+	keys := packagesCacheKeys(pm, pmVersion, dir, lockfile)
 	before := entryNames(dir)
-	_, err = client.RestoreCache(ctx, []string{key, fallbackKey}, sdk.WithStepName(fmt.Sprintf("Restoring %s cache", pm)))
+	_, err = client.RestoreCache(ctx, keys, sdk.WithStepName(fmt.Sprintf("Restoring %s cache", pm)))
 	sdk.LogCacheErr("restore", err)
 	// RestoreCache reports "success" even on a miss, so the only way to
 	// tell a hit apart is to check whether it actually added to dir.
 	if err == nil && addedEntries(dir, before) {
 		fmt.Fprintf(os.Stderr, "setup-node: restored %s from cache\n", dir)
 	}
-	return key, dir
+	return keys[0], dir
 }
 
-// packagesCacheKeys returns the key to save pm's cache under, and a prefix of
-// it to fall back to when nothing is saved under that key yet. The prefix
-// matches the newest cache saved for any lockfile, so a changed lockfile
-// downloads only what changed. Everything that can make a cache unreadable to
-// this job goes before the lockfile hash, so the fallback never crosses it: the
-// package manager and its version, which set the cache's layout, and the cache
-// directory, since a cache restored anywhere else is never read.
-func packagesCacheKeys(pm node.PackageManager, pmVersion, cacheDir string, lockfile []byte) (key, fallback string) {
+// packagesCacheKeys returns the keys to restore pm's cache from, best first;
+// the first is also the key to save it under. After the exact key, a prefix of
+// it matches the newest cache saved for any lockfile, so a changed lockfile
+// downloads only what changed.
+//
+// Everything that can make a cache unreadable to this job goes before the
+// lockfile hash, so the fallback never crosses it: the cache directory, since
+// a cache restored anywhere else is never read, and the package manager and
+// its version, which set the cache's layout. A cache directory named after its
+// layout version, as pnpm's store (store/v10) and Yarn 1's cache (v6) are,
+// changes name when the layout does, so for those a last prefix leaves the
+// version out too, and a package manager upgrade restores the cache the
+// previous version saved rather than starting from nothing.
+func packagesCacheKeys(pm node.PackageManager, pmVersion, cacheDir string, lockfile []byte) []string {
 	dirHash := sha256.Sum256([]byte(cacheDir))
-	fallback = fmt.Sprintf("setup-node-packages-v3-%s-%s-%s-%x-", sdk.OSArch(), pm, pmVersion, dirHash[:4])
-	return fmt.Sprintf("%s%x", fallback, sha256.Sum256(lockfile)), fallback
+	anyVersion := fmt.Sprintf("setup-node-packages-v4-%s-%s-%x-", sdk.OSArch(), pm, dirHash[:4])
+	sameVersion := anyVersion + pmVersion + "-"
+	keys := []string{fmt.Sprintf("%s%x", sameVersion, sha256.Sum256(lockfile)), sameVersion}
+	if layoutVersioned(cacheDir) {
+		keys = append(keys, anyVersion)
+	}
+	return keys
+}
+
+// layoutVersioned reports whether dir is named after a cache layout version,
+// like v10.
+func layoutVersioned(dir string) bool {
+	base := filepath.Base(dir)
+	if len(base) < 2 || base[0] != 'v' {
+		return false
+	}
+	for _, r := range base[1:] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // resolvePackageManager returns the package manager from the flag or by

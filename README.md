@@ -241,7 +241,10 @@ OS, architecture, package manager and its version, the cache directory, and a
 checksum of the lockfile, so a changed lockfile refreshes the cache on its own.
 When nothing is saved for the current lockfile yet, the most recent cache with
 everything else the same is restored instead, so only the packages that changed
-are downloaded.
+are downloaded. pnpm's store and Yarn 1's cache are kept in a directory named
+after their layout version (e.g. `store/v10`), which changes when the layout
+does, so for them a package manager upgrade falls back to the cache the
+previous version saved, too.
 
 The cache directory is whatever the package manager reports: `npm config get
 cache`, `yarn cache dir` on Yarn 1, `yarn config get cacheFolder` on Yarn 2
