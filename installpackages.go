@@ -20,6 +20,9 @@ type installPackagesCmd struct {
 	PackageManager  string `help:"Package manager to use: npm, yarn, pnpm, or bun. Auto-detected from lockfile if omitted." enum:"npm,yarn,pnpm,bun," default:""`
 	OverrideCommand string `help:"Override the default CI install command (e.g. 'npm install --legacy-peer-deps')."`
 	Cache           bool   `help:"Restore the package manager cache before installing and save it at the end. Set to false to disable caching." default:"true"`
+	InstallDir      string `help:"Directory to install the package manager package.json pins under." default:"~/.cache/setup-node" hidden:""`
+	BinDir          string `help:"Link the package manager package.json pins into this directory instead of discovering one on PATH." type:"path" hidden:""`
+	CacheNonce      string `help:"Partition the package manager install cache, so a test run cannot restore an earlier run's install." hidden:""`
 }
 
 func (c *installPackagesCmd) Run(ctx context.Context, client *sdk.Client) error {
@@ -41,7 +44,11 @@ func (c *installPackagesCmd) Run(ctx context.Context, client *sdk.Client) error 
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "setup-node: using package manager %s\n", pm)
-	if err := pm.EnsureBinary(ctx, c.AppDir); err != nil {
+	if version := node.PinnedVersion(c.AppDir, pm); version != "" {
+		if err := c.provision(ctx, client, pm, version); err != nil {
+			return err
+		}
+	} else if err := pm.EnsureBinary(); err != nil {
 		return err
 	}
 
@@ -59,6 +66,82 @@ func (c *installPackagesCmd) Run(ctx context.Context, client *sdk.Client) error 
 	}
 
 	return nil
+}
+
+// provision makes version of pm, the one package.json pins, the one PATH
+// resolves. A package manager already on PATH at that version is used as it
+// is. Otherwise the pinned version is restored from the job cache, or
+// installed with npm and saved to it, and linked ahead of any other on PATH,
+// so neither this job nor a later one downloads it again. Left to itself,
+// pnpm would download the pinned version in every job, into a directory
+// outside its store.
+//
+// Where a package manager at another version is on PATH, failing to put the
+// pinned one ahead of it is only a warning: the install still runs with the
+// one there, as it would have without setup-node.
+func (c *installPackagesCmd) provision(ctx context.Context, client *sdk.Client, pm node.PackageManager, version string) error {
+	got := pm.PathVersion(ctx)
+	if got == version {
+		fmt.Fprintf(os.Stderr, "setup-node: %s %s, the version package.json pins, is already on PATH\n", pm, version)
+		return nil
+	}
+	if got != "" {
+		fmt.Fprintf(os.Stderr, "setup-node: %s on PATH is %s, but package.json pins %s\n", pm, got, version)
+	}
+	err := c.installPinned(ctx, client, pm, version)
+	if err != nil && got != "" {
+		fmt.Fprintf(os.Stderr, "setup-node: warning: %v; running the %s %s already on PATH\n", err, pm, got)
+		return nil
+	}
+	return err
+}
+
+// installPinned restores version of pm from the job cache, or installs it
+// and saves it there, and links it onto PATH.
+func (c *installPackagesCmd) installPinned(ctx context.Context, client *sdk.Client, pm node.PackageManager, version string) error {
+	installDir, err := expandHome(c.InstallDir)
+	if err != nil {
+		return err
+	}
+	root := filepath.Join(installDir, "package-managers", fmt.Sprintf("%s-%s", pm, version))
+	key := packageManagerCacheKey(pm, version, root, c.CacheNonce)
+	if !pm.Installed(root) && c.Cache {
+		_, err := client.RestoreCache(ctx, []string{key}, sdk.WithStepName(fmt.Sprintf("Restoring %s %s", pm, version)))
+		sdk.LogCacheErr("restore", err)
+		if pm.Installed(root) {
+			fmt.Fprintf(os.Stderr, "setup-node: restored %s %s from cache\n", pm, version)
+		}
+	}
+	if !pm.Installed(root) {
+		if err := pm.Install(ctx, c.AppDir, root, version); err != nil {
+			return err
+		}
+		if c.Cache {
+			sdk.LogCacheErr("save", client.SaveCache(ctx, key, []string{root}, sdk.WithStepName(fmt.Sprintf("Saving %s %s", pm, version))))
+		}
+	}
+
+	dir, err := pm.Link(root, version, c.BinDir)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "setup-node: %s %s installed at %s, linked into %s\n", pm, version, root, dir)
+	return nil
+}
+
+// packageManagerCacheKey is the job cache key for an install of version of
+// pm at root. npm installs a package manager the same way whatever Node.js
+// runs it, but pnpm and bun ship a native binary for the platform. root is in
+// the key because a cache restores to the path it was saved from: a job whose
+// $HOME differs, as one running as root does, would otherwise restore an
+// install somewhere it never looks, and install again every time.
+func packageManagerCacheKey(pm node.PackageManager, version, root, nonce string) string {
+	rootHash := sha256.Sum256([]byte(root))
+	key := fmt.Sprintf("setup-node-package-manager-v1-%s-%s-%s-%x", sdk.OSArch(), pm, version, rootHash[:4])
+	if nonce != "" {
+		key += "-" + nonce
+	}
+	return key
 }
 
 // restoreCache restores pm's download cache, and returns the key to save it
