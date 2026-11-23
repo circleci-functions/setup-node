@@ -101,7 +101,7 @@ func TestCLI_Cache_SaveAndRestoreCalled(t *testing.T) {
 	assert.Equal(t, len(rec.restores), 1, "expected exactly one restore call")
 	assert.Equal(t, len(rec.restores[0].Keys), 2, "expected an exact restore key and a fallback")
 	key, fallback := rec.restores[0].Keys[0], rec.restores[0].Keys[1]
-	wantFallback := regexp.MustCompile(`^setup-node-packages-v3-` + runtime.GOOS + `-` + runtime.GOARCH + `-npm-10\.9\.0-[0-9a-f]{8}-$`)
+	wantFallback := regexp.MustCompile(`^setup-node-packages-v4-` + runtime.GOOS + `-` + runtime.GOARCH + `-npm-[0-9a-f]{8}-10\.9\.0-$`)
 	assert.Assert(t, wantFallback.MatchString(fallback), "unexpected fallback key: %s", fallback)
 	assert.Assert(t, regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(strings.TrimPrefix(key, fallback)),
 		"expected the exact key to be the fallback plus the lockfile hash: %s", key)
@@ -201,6 +201,43 @@ func TestCLI_Cache_KeysChangeWithCacheInputs(t *testing.T) {
 			assert.Assert(t, got[1] != base[1], "expected the fallback key to change: %s", got[1])
 		})
 	}
+}
+
+// TestCLI_Cache_FallbackCrossesVersionsForVersionedCacheDir verifies that a
+// cache directory named after its layout version, as pnpm's store is, gets a
+// last fallback key without the package manager version, so an upgrade
+// restores the previous version's cache. Any other cache directory doesn't,
+// since its layout may change with the version.
+func TestCLI_Cache_FallbackCrossesVersionsForVersionedCacheDir(t *testing.T) {
+	keys := func(t *testing.T, cacheDir, version string) []string {
+		t.Helper()
+		_, run := sandbox(t)
+		rec, pluginURL := newCacheRecorder(t)
+		appDir := copyFixture(t, "npm")
+		env := map[string]string{
+			"CIRCLECI_PLUGIN_URL": pluginURL,
+			"NPM_CONFIG_CACHE":    cacheDir,
+			"PATH":                stubPMPathVersion(t, version),
+		}
+		out, err := run(t, env, "install-packages", "--app-dir", appDir, "--package-manager", "npm")
+		assert.NilError(t, err, "output: %s", out)
+		assert.Equal(t, len(rec.restores), 1, "output: %s", out)
+		return rec.restores[0].Keys
+	}
+
+	t.Run("versioned", func(t *testing.T) {
+		cacheDir := filepath.Join(t.TempDir(), "v10")
+		old, upgraded := keys(t, cacheDir, "10.9.0"), keys(t, cacheDir, "10.10.0")
+		assert.Equal(t, len(upgraded), 3, "expected an exact key and two fallbacks: %v", upgraded)
+		assert.Assert(t, strings.HasPrefix(old[0], upgraded[2]),
+			"expected the last fallback %s to match the key %s the previous version saved under", upgraded[2], old[0])
+		assert.Assert(t, !strings.HasPrefix(old[0], upgraded[1]), "expected the first fallback to keep the version: %s", upgraded[1])
+	})
+
+	t.Run("not versioned", func(t *testing.T) {
+		got := keys(t, t.TempDir(), "10.9.0")
+		assert.Equal(t, len(got), 2, "expected no fallback across versions: %v", got)
+	})
 }
 
 // TestCLI_Cache_SkippedWhenVersionUnknown verifies that a package manager that
