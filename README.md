@@ -108,16 +108,32 @@ executables will not be on `PATH`.
 
 ### Package managers
 
-`install-packages` runs the package manager on `PATH`, whatever its version.
-npm comes with Node.js. If pnpm, yarn or bun is missing and `package.json` pins
-it with `packageManager` (e.g. `"packageManager": "pnpm@10.12.1"`),
-`install-packages` installs that version with `npm install --global` first.
+npm comes with Node.js. For pnpm, yarn and bun, `install-packages` uses the
+version `package.json` pins with `packageManager` (e.g. `"packageManager":
+"pnpm@10.12.1"`):
+
+- If the one on `PATH` is already that version, it is used as it is.
+- Otherwise `install-packages` installs the pinned version with `npm install
+  --global --prefix ~/.cache/setup-node/package-managers/<name>-<version>`,
+  saves it to the job cache, and links it ahead of any other on `PATH`, the
+  way Node.js is linked (see [Where Node.js is linked](#where-nodejs-is-linked)).
+  Later jobs restore it rather than install it again. The install runs from
+  `--app-dir`, so the project's `.npmrc` picks the registry.
+
+This matters most on an image that ships a package manager, such as
+`cimg/node`: when the pnpm on `PATH` is another version, pnpm downloads the
+pinned one itself, again in every job. If installing the pinned version
+fails while another version is on `PATH`, `install-packages` warns and runs
+the one on `PATH`.
+
 Yarn 2 and later come from npm's `@yarnpkg/cli-dist` package, since the `yarn`
 package stops at Yarn 1. corepack is not used: Node.js 25 and later don't ship
-it.
+it. `--cache=false` turns off caching the pinned package manager along with
+the packages.
 
-With no pin, a missing package manager fails the step, so install it in an
-earlier step:
+With no pin, `install-packages` runs the package manager on `PATH`, whatever
+its version, and a missing one fails the step, so install it in an earlier
+step:
 
 ```yaml
 - node:

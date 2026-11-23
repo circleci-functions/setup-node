@@ -21,17 +21,18 @@ func TestPinnedVersion(t *testing.T) {
 		{name: "no packageManager", manifest: `{"name": "app"}`, pm: PNPM, want: ""},
 		{name: "no version", manifest: `{"packageManager": "pnpm"}`, pm: PNPM, want: ""},
 		{name: "invalid JSON", manifest: `{`, pm: PNPM, want: ""},
+		{name: "npm comes with Node.js", manifest: `{"packageManager": "npm@10.9.0"}`, pm: NPM, want: ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			assert.NilError(t, os.WriteFile(filepath.Join(dir, "package.json"), []byte(tc.manifest), 0600))
-			assert.Equal(t, pinnedVersion(dir, tc.pm), tc.want)
+			assert.Equal(t, PinnedVersion(dir, tc.pm), tc.want)
 		})
 	}
 
 	t.Run("no package.json", func(t *testing.T) {
-		assert.Equal(t, pinnedVersion(t.TempDir(), PNPM), "")
+		assert.Equal(t, PinnedVersion(t.TempDir(), PNPM), "")
 	})
 }
 
