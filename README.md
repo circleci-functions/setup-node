@@ -31,14 +31,6 @@ installs Node.js, and `<alias>/install-packages` runs `install-packages`. Each
 flag below becomes a `with:` key without its leading `--`, and a step with no
 flags needs no `with:` at all.
 
-Where the `functions:` block isn't available, as on CircleCI Server, run the
-function by its full name instead:
-
-```yaml
-- run: circleci run github.com/circleci-functions/setup-node@<version> -- --node-version 22
-- run: circleci run github.com/circleci-functions/setup-node@<version> -- install-packages --app-dir ./frontend
-```
-
 ## Installing Node.js
 
 With no command, setup-node downloads the official Node.js build for the
@@ -186,7 +178,7 @@ downloading.
 | `--install-dir` | `~/.cache/setup-node` | Directory to unpack Node.js versions under |
 
 `--install-dir` is not one of the function's published arguments, so it can't
-be set under `with:`. Pass it in the `circleci run` form instead.
+be set under `with:`.
 
 ## Installing dependencies
 
